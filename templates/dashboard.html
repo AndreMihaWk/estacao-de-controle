@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SMAC — Monitor de ambiente</title>
+  <style>
+    :root {
+      --fundo:        #0d1b2a;
+      --superficie:   #16263a;
+      --borda:        #24384f;
+      --texto:        #e8eef5;
+      --texto-fraco:  #8ba0b6;
+      --ok:           #2dd4bf;   /* teal calmo quando esta tudo bem */
+      --alerta:       #fb7185;   /* rosa-quente quando passa do limite */
+      --acento:       var(--ok); /* muda para --alerta em tempo real */
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--fundo);
+      color: var(--texto);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      display: flex;
+      justify-content: center;
+      padding: 32px 20px 64px;
+    }
+
+    .painel { width: 100%; max-width: 720px; }
+
+    header { margin-bottom: 28px; }
+    header h1 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      margin: 0;
+      letter-spacing: 0.2px;
+    }
+    header p {
+      margin: 4px 0 0;
+      color: var(--texto-fraco);
+      font-size: 0.9rem;
+    }
+
+    /* --- bloco principal: a temperatura e a estrela --- */
+    .hero {
+      background: var(--superficie);
+      border: 1px solid var(--borda);
+      border-radius: 16px;
+      padding: 28px 32px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+    .temp {
+      font-size: 5.5rem;
+      line-height: 1;
+      font-weight: 650;
+      font-variant-numeric: tabular-nums;
+      color: var(--acento);
+      transition: color 0.4s ease;
+    }
+    .temp span { font-size: 2rem; color: var(--texto-fraco); font-weight: 500; }
+
+    .selo {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      border-radius: 999px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      background: color-mix(in srgb, var(--acento) 15%, transparent);
+      color: var(--acento);
+      border: 1px solid color-mix(in srgb, var(--acento) 40%, transparent);
+      transition: all 0.4s ease;
+    }
+    .bolinha {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: var(--acento);
+      box-shadow: 0 0 0 0 var(--acento);
+      animation: pulso 1.8s infinite;
+    }
+    @keyframes pulso {
+      0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--acento) 60%, transparent); }
+      70%  { box-shadow: 0 0 0 10px transparent; }
+      100% { box-shadow: 0 0 0 0 transparent; }
+    }
+
+    .mensagem { margin: 16px 2px 0; color: var(--texto-fraco); font-size: 0.95rem; }
+
+    /* --- estatisticas secundarias --- */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin: 12px 0 28px;
+    }
+    .stat {
+      background: var(--superficie);
+      border: 1px solid var(--borda);
+      border-radius: 12px;
+      padding: 16px 18px;
+    }
+    .stat .rotulo { color: var(--texto-fraco); font-size: 0.8rem; }
+    .stat .valor  { font-size: 1.5rem; font-weight: 600; margin-top: 4px;
+                    font-variant-numeric: tabular-nums; }
+
+    /* --- grafico --- */
+    .grafico-caixa {
+      background: var(--superficie);
+      border: 1px solid var(--borda);
+      border-radius: 16px;
+      padding: 20px 20px 12px;
+    }
+    .grafico-caixa h2 {
+      margin: 0 0 12px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--texto-fraco);
+    }
+    canvas { width: 100%; height: 220px; display: block; }
+
+    footer { margin-top: 20px; color: var(--texto-fraco); font-size: 0.8rem; }
+
+    @media (max-width: 480px) {
+      .temp { font-size: 4rem; }
+      .stats { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="painel">
+    <header>
+      <h1>SMAC — Monitor de ambiente na nuvem</h1>
+      <p id="subtitulo">Sala 1 · aguardando dados…</p>
+    </header>
+
+    <section class="hero">
+      <div class="temp" id="temperatura">--<span>°C</span></div>
+      <div class="selo" id="selo"><span class="bolinha"></span><span id="statusTexto">—</span></div>
+    </section>
+    <p class="mensagem" id="mensagem">Ligue o simulador para começar a receber leituras.</p>
+
+    <div class="stats">
+      <div class="stat"><div class="rotulo">Umidade</div><div class="valor" id="umidade">--%</div></div>
+      <div class="stat"><div class="rotulo">Limite de alerta</div><div class="valor" id="limite">28,0 °C</div></div>
+      <div class="stat"><div class="rotulo">Última atualização</div><div class="valor" id="atualizacao">--:--</div></div>
+    </div>
+
+    <div class="grafico-caixa">
+      <h2>Temperatura — últimas leituras</h2>
+      <canvas id="grafico"></canvas>
+    </div>
+
+    <footer>Atualiza automaticamente a cada 3 segundos.</footer>
+  </div>
+
+  <script>
+    const SALA = "Sala 1";
+    const LIMITE = 28.0;
+
+    // ---- busca os dados na API e atualiza a tela ----
+    async function atualizar() {
+      try {
+        const [status, hist] = await Promise.all([
+          fetch(`/api/status?sala=${encodeURIComponent(SALA)}`).then(r => r.json()),
+          fetch(`/api/leituras?sala=${encodeURIComponent(SALA)}&limite=30`).then(r => r.json()),
+        ]);
+
+        if (status.leitura) {
+          const t = status.leitura.temperatura;
+          const alerta = status.avaliacao.status === "ALERTA";
+
+          document.documentElement.style.setProperty(
+            "--acento", alerta ? "var(--alerta)" : "var(--ok)"
+          );
+          document.getElementById("temperatura").innerHTML =
+            `${t.toFixed(1).replace(".", ",")}<span>°C</span>`;
+          document.getElementById("statusTexto").textContent = status.avaliacao.status;
+          document.getElementById("mensagem").textContent = status.avaliacao.mensagem;
+          document.getElementById("umidade").textContent =
+            `${status.leitura.umidade.toFixed(0)}%`;
+          document.getElementById("atualizacao").textContent =
+            status.leitura.momento.slice(11, 16);
+          document.getElementById("subtitulo").textContent =
+            `${SALA} · monitorando em tempo real`;
+        }
+
+        desenharGrafico(hist.leituras.map(l => l.temperatura));
+      } catch (e) {
+        document.getElementById("mensagem").textContent =
+          "Sem conexão com a API. Ela está rodando? (uvicorn api:app --reload)";
+      }
+    }
+
+    // ---- grafico de linha desenhado na mao, sem depender de internet ----
+    function desenharGrafico(valores) {
+      const canvas = document.getElementById("grafico");
+      const dpr = window.devicePixelRatio || 1;
+      const L = canvas.clientWidth, A = 220;
+      canvas.width = L * dpr; canvas.height = A * dpr;
+      const ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, L, A);
+
+      if (valores.length < 2) return;
+
+      const pad = 34;
+      const min = Math.min(...valores, LIMITE) - 1;
+      const max = Math.max(...valores, LIMITE) + 1;
+      const x = i => pad + (i / (valores.length - 1)) * (L - pad - 12);
+      const y = v => A - pad - ((v - min) / (max - min)) * (A - pad - 12);
+
+      const corTexto = "#8ba0b6", corLinha = "#24384f";
+
+      // eixos / grade horizontal
+      ctx.strokeStyle = corLinha; ctx.fillStyle = corTexto;
+      ctx.font = "11px system-ui"; ctx.lineWidth = 1;
+      for (let g = 0; g <= 3; g++) {
+        const valor = min + (g / 3) * (max - min);
+        const py = y(valor);
+        ctx.beginPath(); ctx.moveTo(pad, py); ctx.lineTo(L - 12, py); ctx.stroke();
+        ctx.fillText(valor.toFixed(0), 6, py + 4);
+      }
+
+      // linha do limite de alerta (tracejada)
+      ctx.strokeStyle = "#fb7185"; ctx.setLineDash([5, 4]);
+      ctx.beginPath(); ctx.moveTo(pad, y(LIMITE)); ctx.lineTo(L - 12, y(LIMITE)); ctx.stroke();
+      ctx.setLineDash([]);
+
+      // linha da temperatura
+      const acento = getComputedStyle(document.documentElement)
+        .getPropertyValue("--acento").includes("alerta") ? "#fb7185" : "#2dd4bf";
+      ctx.strokeStyle = "#38bdf8"; ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      valores.forEach((v, i) => i === 0 ? ctx.moveTo(x(i), y(v)) : ctx.lineTo(x(i), y(v)));
+      ctx.stroke();
+
+      // ponto final destacado
+      const ult = valores.length - 1;
+      ctx.fillStyle = valores[ult] > LIMITE ? "#fb7185" : "#2dd4bf";
+      ctx.beginPath(); ctx.arc(x(ult), y(valores[ult]), 4, 0, Math.PI * 2); ctx.fill();
+    }
+
+    atualizar();
+    setInterval(atualizar, 3000);
+  </script>
+</body>
+</html>
