@@ -20,8 +20,8 @@ as últimas são melhorias que **você** implementa para aprender de verdade.
 
 ## Etapa 2 — Deixar seu (pequenas mudanças suas)
 
-- [ ] **2.1 Trocar o nome da sala.** Mudar `"Sala 1"` para o nome de uma sala real da faculdade (no `simulador.py` e no `dashboard.html`).
-      _Pronto quando:_ o painel mostra o nome novo.
+- [ ] **2.1 Trocar o nome da sala.** Rodar o simulador em outra sala (ex.: `python simulador.py 305`) e dar nome ao equipamento dela pelo site.
+      _Pronto quando:_ a sala escolhida aparece com temperatura e com o nome do equipamento.
 - [ ] **2.2 Mostrar a umidade no gráfico também**, ou criar um segundo cartão com a média das últimas leituras.
       _Pronto quando:_ aparece uma informação nova que você calculou.
 - [ ] **2.3 Ajustar o alerta.** Fazer o alerta considerar umidade alta também (ex.: quente E úmido).

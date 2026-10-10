@@ -2,30 +2,58 @@
 
 Projeto de extensão para a disciplina **Aplic. de Cloud, IoT e Indústria 4.0 em Python** (Estácio).
 
-Um dispositivo IoT mede a **temperatura** e a **umidade** de uma sala e envia
-para a nuvem. Um servidor em Python **guarda** os dados, **decide** se o
-ambiente está quente demais e mostra tudo num **painel** que atualiza sozinho.
-Quando a temperatura passa do limite, o painel dispara um **alerta**.
+Uma **estação de controle** das centrais de ar das salas da faculdade. Pelo
+site dá para **ligar e desligar** o ar de cada sala de forma remota,
+**programar horário** e acompanhar a temperatura. Uma **webcam** verifica se
+há pessoas na sala e, se ela estiver vazia, o sistema **desliga o ar sozinho**
+por infravermelho e avisa no site.
 
-> Enquanto o hardware (ESP32 + sensor) não chega, um **simulador em Python**
-> faz o papel do dispositivo. Assim dá para construir e testar o sistema
-> inteiro hoje, sem comprar nada. Quando o ESP32 chegar, ele passa a chamar o
-> mesmo endpoint e o resto do sistema nem percebe a diferença.
+> Enquanto o hardware (ESP32 + sensor + LED infravermelho) não chega, um
+> **simulador em Python** faz o papel do dispositivo. Quando o ESP32 chegar,
+> ele passa a chamar os mesmos endereços e o resto do sistema nem percebe.
+
+## As salas
+
+| Bloco | Salas | Bloco | Salas |
+|-------|-------|-------|-------|
+| A | 101 a 110 | D | 401 a 420 |
+| B | 201 a 210 | E | 501 a 520 |
+| C | 301 a 320 | F | 601 a 620 |
+
+A letra do bloco define a centena (A = 100, B = 200...). Para mudar a
+quantidade de salas, edite `BLOCOS` no `banco.py`.
+
+## A regra da sala vazia
+
+Com o ar ligado, a câmera verifica a sala:
+
+1. **Viu pessoas** → só verifica de novo depois de **1 hora**.
+2. **Não viu ninguém** → confere de novo depois de **30 minutos**.
+3. **Não viu ninguém na conferência também** → desliga o ar por infravermelho
+   e o site mostra o aviso "Desligado automaticamente".
+
+A regra fica em `avaliar_presenca()` no `api.py`. Para demonstrar sem esperar,
+troque `MINUTOS_COM_PESSOAS` e `MINUTOS_SEM_PESSOAS` por valores pequenos.
 
 ## Como o sistema é dividido
 
 ```
-  simulador.py            api.py (FastAPI)            dashboard.html
-  (o dispositivo)  --->   recebe / guarda / decide -> painel no navegador
-                          usa banco.py + smac.db
+  simulador.py / ESP32  <--->  api.py (FastAPI)  <--->  site (dashboard.html)
+  (infravermelho + sensor)     guarda / decide          liga, desliga, agenda
+                                     ^
+  camera.py (webcam)  ---------------+   usa banco.py + smac.db
+  (conta as pessoas)
 ```
 
-| Camada da matéria | O que faz o papel no projeto |
-|-------------------|------------------------------|
-| **IoT**           | `simulador.py` (hoje) → ESP32 + sensor (depois) |
-| **Cloud**         | `api.py` (FastAPI) + banco de dados `smac.db`   |
-| **Indústria 4.0** | a regra automática `avaliar_ambiente()` que gera o alerta |
-| **Python**        | tudo, do começo ao fim |
+| Arquivo | Papel |
+|---------|-------|
+| `api.py` | o servidor: recebe dados, aplica as regras e a agenda |
+| `banco.py` | todas as funções que falam com o banco `smac.db` |
+| `templates/dashboard.html` | o site (estrutura e comportamento) |
+| `static/dashboard_style.css` | a aparência do site |
+| `simulador.py` | dispositivo de mentira de uma sala |
+| `camera.py` | conta as pessoas pela webcam |
+| `esp32/esp32_sala.ino` | código do ESP32 de verdade (um por sala) |
 
 ## Como rodar (passo a passo)
 
@@ -43,30 +71,40 @@ pip install -r requirements.txt
 uvicorn api:app --reload
 ```
 
-**3. Abrir o painel** no navegador:
+**3. Abrir o site** no navegador: `http://127.0.0.1:8000`
 
-```
-http://127.0.0.1:8000
-```
-
-**4. Ligar o simulador** em **outro** terminal (para os dados começarem a chegar):
+**4. Ligar o simulador** em **outro** terminal (faz o papel do ESP32 da sala 101):
 
 ```bash
-python simulador.py
+python simulador.py          # ou: python simulador.py 305
 ```
 
-Pronto: o painel começa a se atualizar a cada 3 segundos. Para ver o **alerta**
-disparar, espere o simulador "esquentar" a sala, ou abra o `api.py` e baixe o
-`LIMITE_TEMPERATURA` para um valor mais baixo (ex.: `25.0`).
+**5. Ligar a câmera** em **outro** terminal (vigia a sala 101 pela webcam):
+
+```bash
+python camera.py --teste     # mostra o que cada webcam do computador vê
+python camera.py 101 1       # vigia a sala 101 usando a webcam 1
+```
+
+No site, clique na sala 101 e em **Ligar**: o simulador mostra o disparo do
+infravermelho e a câmera faz a primeira verificação.
+
+Para o ESP32 e outros computadores alcançarem a API pela rede, suba o
+servidor com `uvicorn api:app --host 0.0.0.0`.
 
 ## Endereços da API (para explicar no relatório)
 
-| Método | Endereço | Para que serve |
-|--------|----------|----------------|
-| POST | `/api/leituras` | o dispositivo envia uma medição |
-| GET  | `/api/status`   | o painel pega a situação atual da sala |
-| GET  | `/api/leituras` | o painel pega o histórico p/ o gráfico |
-| GET  | `/`             | abre o painel |
+| Método | Endereço | Quem usa | Para que serve |
+|--------|----------|----------|----------------|
+| GET  | `/api/salas` | site | estado de todas as salas |
+| POST | `/api/salas/{sala}/energia` | site | ligar / desligar o ar |
+| PUT  | `/api/salas/{sala}/agenda` | site | programar horário |
+| PUT  | `/api/salas/{sala}/equipamento` | site | nome do equipamento da sala |
+| GET  | `/api/eventos` | site | avisos (o que o sistema fez) |
+| GET  | `/api/salas/{sala}/comando` | ESP32 | "o ar deve estar ligado?" |
+| POST | `/api/leituras` | ESP32 | enviar temperatura e umidade |
+| GET  | `/api/salas/{sala}/verificacao` | câmera | "é hora de verificar?" |
+| POST | `/api/salas/{sala}/presenca` | câmera | informar quantas pessoas viu |
 
 Com o servidor no ar, a documentação automática da API fica em
 `http://127.0.0.1:8000/docs` (um recurso pronto do FastAPI — ótimo print para o relatório).
@@ -80,6 +118,6 @@ Com o servidor no ar, a documentação automática da API fica em
 
 ## Próximo passo (evolução)
 
-Trocar o envio por HTTP pelo protocolo **MQTT** (o mais usado em IoT) e, por
-fim, substituir o simulador pelo **ESP32** de verdade. A estrutura já está
-pronta para isso — só muda quem envia os dados.
+Gravar o `esp32/esp32_sala.ino` em um ESP32 de verdade (ajustando Wi-Fi, sala
+e a marca do ar-condicionado) e, depois, trocar o envio por HTTP pelo
+protocolo **MQTT** (o mais usado em IoT).

@@ -3,223 +3,350 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SMAC — Monitor de ambiente</title>
-  <style>
-    :root {
-      --fundo:        #0d1b2a;
-      --superficie:   #16263a;
-      --borda:        #24384f;
-      --texto:        #e8eef5;
-      --texto-fraco:  #8ba0b6;
-      --ok:           #2dd4bf;   /* teal calmo quando esta tudo bem */
-      --alerta:       #fb7185;   /* rosa-quente quando passa do limite */
-      --acento:       var(--ok); /* muda para --alerta em tempo real */
-    }
-
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-      background: var(--fundo);
-      color: var(--texto);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      display: flex;
-      justify-content: center;
-      padding: 32px 20px 64px;
-    }
-
-    .painel { width: 100%; max-width: 720px; }
-
-    header { margin-bottom: 28px; }
-    header h1 {
-      font-size: 1.15rem;
-      font-weight: 600;
-      margin: 0;
-      letter-spacing: 0.2px;
-    }
-    header p {
-      margin: 4px 0 0;
-      color: var(--texto-fraco);
-      font-size: 0.9rem;
-    }
-
-    /* --- bloco principal: a temperatura e a estrela --- */
-    .hero {
-      background: var(--superficie);
-      border: 1px solid var(--borda);
-      border-radius: 16px;
-      padding: 28px 32px;
-      display: flex;
-      align-items: flex-end;
-      justify-content: space-between;
-      gap: 24px;
-      flex-wrap: wrap;
-    }
-    .temp {
-      font-size: 5.5rem;
-      line-height: 1;
-      font-weight: 650;
-      font-variant-numeric: tabular-nums;
-      color: var(--acento);
-      transition: color 0.4s ease;
-    }
-    .temp span { font-size: 2rem; color: var(--texto-fraco); font-weight: 500; }
-
-    .selo {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 16px;
-      border-radius: 999px;
-      font-size: 0.95rem;
-      font-weight: 600;
-      background: color-mix(in srgb, var(--acento) 15%, transparent);
-      color: var(--acento);
-      border: 1px solid color-mix(in srgb, var(--acento) 40%, transparent);
-      transition: all 0.4s ease;
-    }
-    .bolinha {
-      width: 9px; height: 9px; border-radius: 50%;
-      background: var(--acento);
-      box-shadow: 0 0 0 0 var(--acento);
-      animation: pulso 1.8s infinite;
-    }
-    @keyframes pulso {
-      0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--acento) 60%, transparent); }
-      70%  { box-shadow: 0 0 0 10px transparent; }
-      100% { box-shadow: 0 0 0 0 transparent; }
-    }
-
-    .mensagem { margin: 16px 2px 0; color: var(--texto-fraco); font-size: 0.95rem; }
-
-    /* --- estatisticas secundarias --- */
-    .stats {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 12px;
-      margin: 12px 0 28px;
-    }
-    .stat {
-      background: var(--superficie);
-      border: 1px solid var(--borda);
-      border-radius: 12px;
-      padding: 16px 18px;
-    }
-    .stat .rotulo { color: var(--texto-fraco); font-size: 0.8rem; }
-    .stat .valor  { font-size: 1.5rem; font-weight: 600; margin-top: 4px;
-                    font-variant-numeric: tabular-nums; }
-
-    /* --- grafico --- */
-    .grafico-caixa {
-      background: var(--superficie);
-      border: 1px solid var(--borda);
-      border-radius: 16px;
-      padding: 20px 20px 12px;
-    }
-    .grafico-caixa h2 {
-      margin: 0 0 12px;
-      font-size: 0.95rem;
-      font-weight: 600;
-      color: var(--texto-fraco);
-    }
-    canvas { width: 100%; height: 220px; display: block; }
-
-    footer { margin-top: 20px; color: var(--texto-fraco); font-size: 0.8rem; }
-
-    @media (max-width: 480px) {
-      .temp { font-size: 4rem; }
-      .stats { grid-template-columns: 1fr; }
-    }
-  </style>
+  <title>SMAC — Estação de controle</title>
+  <link rel="stylesheet" href="/static/dashboard_style.css">
 </head>
 <body>
   <div class="painel">
     <header>
-      <h1>SMAC — Monitor de ambiente na nuvem</h1>
-      <p id="subtitulo">Sala 1 · aguardando dados…</p>
+      <h1>SMAC — Estação de controle</h1>
+      <p id="subtitulo">Carregando salas…</p>
     </header>
 
-    <section class="hero">
-      <div class="temp" id="temperatura">--<span>°C</span></div>
-      <div class="selo" id="selo"><span class="bolinha"></span><span id="statusTexto">—</span></div>
-    </section>
-    <p class="mensagem" id="mensagem">Ligue o simulador para começar a receber leituras.</p>
-
     <div class="stats">
-      <div class="stat"><div class="rotulo">Umidade</div><div class="valor" id="umidade">--%</div></div>
-      <div class="stat"><div class="rotulo">Limite de alerta</div><div class="valor" id="limite">28,0 °C</div></div>
-      <div class="stat"><div class="rotulo">Última atualização</div><div class="valor" id="atualizacao">--:--</div></div>
+      <div class="stat"><div class="rotulo">Ar ligado</div><div class="valor" id="totalLigadas">--</div></div>
+      <div class="stat"><div class="rotulo">Salas com pessoas</div><div class="valor" id="totalPessoas">--</div></div>
+      <div class="stat"><div class="rotulo">Desligadas por sala vazia</div><div class="valor" id="totalVazias">--</div></div>
+      <div class="stat"><div class="rotulo">Acima do limite de temperatura</div><div class="valor" id="totalQuentes">--</div></div>
     </div>
 
-    <div class="grafico-caixa">
-      <h2>Temperatura — últimas leituras</h2>
-      <canvas id="grafico"></canvas>
-    </div>
+    <section class="caixa avisos">
+      <h2>Avisos recentes</h2>
+      <ul class="lista-eventos" id="avisos"></ul>
+      <p class="vazio" id="semAvisos">Nada aconteceu ainda. Clique numa sala para ligar o ar.</p>
+    </section>
+
+    <p class="legenda">
+      <span><i class="l-ligada"></i>Ar ligado</span>
+      <span><i></i>Ar desligado</span>
+      <span><i class="l-vazia"></i>Desligado automaticamente (sala vazia)</span>
+    </p>
+
+    <div id="blocos"></div>
 
     <footer>Atualiza automaticamente a cada 3 segundos.</footer>
   </div>
 
+  <!-- janela que abre ao clicar numa sala -->
+  <dialog id="janela">
+    <div class="topo">
+      <div>
+        <h3 id="jTitulo">Sala</h3>
+        <p id="jBloco"></p>
+      </div>
+      <button class="botao discreto" id="jFechar">Fechar</button>
+    </div>
+
+    <div class="energia">
+      <div class="selo" id="jSelo"><span class="bolinha"></span><span id="jEstado">—</span></div>
+      <button class="botao" id="jEnergia">Ligar</button>
+    </div>
+    <p class="motivo" id="jMotivo"></p>
+
+    <dl class="dados">
+      <div><dt>Pessoas na última verificação</dt><dd id="jPessoas">—</dd></div>
+      <div><dt>Próxima verificação</dt><dd id="jProxima">—</dd></div>
+      <div><dt>Temperatura</dt><dd id="jTemperatura">—</dd></div>
+      <div><dt>Conexão</dt><dd id="jConexao">—</dd></div>
+    </dl>
+
+    <div class="secao">
+      <h4>Horário programado (todos os dias)</h4>
+      <div class="campos">
+        <label>Ligar às <input type="time" id="jHoraLigar"></label>
+        <label>Desligar às <input type="time" id="jHoraDesligar"></label>
+        <button class="botao" id="jSalvarAgenda">Salvar horário</button>
+        <button class="botao discreto" id="jLimparAgenda">Limpar</button>
+      </div>
+    </div>
+
+    <div class="secao">
+      <h4>Equipamento</h4>
+      <div class="campos">
+        <label class="largo">Nome / modelo <input type="text" id="jEquipamento" maxlength="60"></label>
+        <button class="botao" id="jSalvarEquipamento">Salvar</button>
+      </div>
+    </div>
+
+    <p class="retorno" id="jRetorno"></p>
+
+    <div class="secao" id="jSecaoGrafico" hidden>
+      <h4>Temperatura — últimas leituras</h4>
+      <canvas id="grafico"></canvas>
+    </div>
+
+    <div class="secao">
+      <h4>Histórico da sala</h4>
+      <ul class="lista-eventos" id="jEventos"></ul>
+      <p class="vazio" id="jSemEventos">Nenhum registro para esta sala.</p>
+    </div>
+  </dialog>
+
   <script>
-    const SALA = "Sala 1";
-    const LIMITE = 28.0;
+    const $ = id => document.getElementById(id);
 
-    // ---- busca os dados na API e atualiza a tela ----
-    async function atualizar() {
-      try {
-        const [status, hist] = await Promise.all([
-          fetch(`/api/status?sala=${encodeURIComponent(SALA)}`).then(r => r.json()),
-          fetch(`/api/leituras?sala=${encodeURIComponent(SALA)}&limite=30`).then(r => r.json()),
-        ]);
+    let salas = {};          // numero -> dados da sala (vindos da API)
+    let cartoes = {};        // numero -> elementos do cartao da sala na tela
+    let salaAberta = null;   // numero da sala com a janela aberta
+    let limite = 28.0;       // limite de temperatura (a API informa o valor real)
 
-        if (status.leitura) {
-          const t = status.leitura.temperatura;
-          const alerta = status.avaliacao.status === "ALERTA";
+    // ---- pequenos ajudantes ----
+    function criar(tag, classe, texto) {
+      const e = document.createElement(tag);
+      if (classe) e.className = classe;
+      if (texto !== undefined) e.textContent = texto;
+      return e;
+    }
 
-          document.documentElement.style.setProperty(
-            "--acento", alerta ? "var(--alerta)" : "var(--ok)"
-          );
-          document.getElementById("temperatura").innerHTML =
-            `${t.toFixed(1).replace(".", ",")}<span>°C</span>`;
-          document.getElementById("statusTexto").textContent = status.avaliacao.status;
-          document.getElementById("mensagem").textContent = status.avaliacao.mensagem;
-          document.getElementById("umidade").textContent =
-            `${status.leitura.umidade.toFixed(0)}%`;
-          document.getElementById("atualizacao").textContent =
-            status.leitura.momento.slice(11, 16);
-          document.getElementById("subtitulo").textContent =
-            `${SALA} · monitorando em tempo real`;
-        }
+    // "2026-10-10T17:22:05" -> "17:22" (hoje) ou "10/10 17:22" (outro dia)
+    function quando(momento) {
+      if (!momento) return "—";
+      const hora = momento.slice(11, 16);
+      const d = new Date();
+      const hoje = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      if (momento.slice(0, 10) === hoje) return hora;
+      return `${momento.slice(8, 10)}/${momento.slice(5, 7)} ${hora}`;
+    }
 
-        desenharGrafico(hist.leituras.map(l => l.temperatura));
-      } catch (e) {
-        document.getElementById("mensagem").textContent =
-          "Sem conexão com a API. Ela está rodando? (uvicorn api:app --reload)";
+    const graus = t => `${t.toFixed(1).replace(".", ",")} °C`;
+
+    async function chamar(metodo, caminho, corpo) {
+      const resposta = await fetch(caminho, {
+        method: metodo,
+        headers: { "Content-Type": "application/json" },
+        body: corpo === undefined ? undefined : JSON.stringify(corpo),
+      });
+      const dados = await resposta.json();
+      if (!resposta.ok) {
+        const d = dados.detail;
+        throw new Error(typeof d === "string" ? d : "Dados inválidos. Confira os campos.");
+      }
+      return dados;
+    }
+
+    // ---- textos que descrevem o estado de uma sala ----
+    function textoEstado(s) {
+      if (s.ligado) return s.ausencias > 0 ? "Ligado · conferindo" : "Ligado";
+      return s.desligado_por_sala_vazia ? "Desligado · vazia" : "Desligado";
+    }
+
+    function textoDetalhe(s) {
+      const partes = [];
+      if (s.temperatura !== null) partes.push(graus(s.temperatura));
+      if (s.ligado && s.pessoas !== null) partes.push(s.pessoas > 0 ? `${s.pessoas} pess.` : "ninguém");
+      if (!partes.length && (s.hora_ligar || s.hora_desligar)) partes.push("agendada");
+      return partes.join(" · ");
+    }
+
+    // ---- monta os blocos e as salas (uma unica vez) ----
+    function montarBlocos(lista) {
+      const porBloco = {};
+      lista.forEach(s => (porBloco[s.bloco] = porBloco[s.bloco] || []).push(s));
+
+      for (const [bloco, doBloco] of Object.entries(porBloco)) {
+        const secao = criar("section", "bloco");
+        const titulo = criar("h2", "", `Bloco ${bloco} `);
+        titulo.append(criar("span", "", `· salas ${doBloco[0].numero} a ${doBloco[doBloco.length - 1].numero}`));
+        const grade = criar("div", "salas");
+
+        doBloco.forEach(s => {
+          const botao = criar("button", "sala");
+          const estado = criar("span", "estado");
+          const detalhe = criar("span", "detalhe");
+          botao.append(criar("span", "numero", s.numero), estado, detalhe);
+          botao.addEventListener("click", () => abrirSala(s.numero));
+          grade.append(botao);
+          cartoes[s.numero] = { botao, estado, detalhe };
+        });
+
+        secao.append(titulo, grade);
+        $("blocos").append(secao);
       }
     }
 
+    // ---- lista de eventos (avisos gerais ou historico de uma sala) ----
+    function preencherEventos(ul, vazio, eventos, mostrarSala) {
+      ul.replaceChildren(...eventos.map(e => {
+        const li = criar("li", e.tipo === "DESLIGADO_AUTO" ? "auto" : "");
+        li.append(criar("span", "quando", quando(e.momento)));
+        if (mostrarSala) li.append(criar("span", "onde", `Sala ${e.sala}`));
+        li.append(criar("span", "texto", e.mensagem));
+        return li;
+      }));
+      vazio.hidden = eventos.length > 0;
+    }
+
+    // ---- busca tudo na API e atualiza a tela ----
+    async function atualizar() {
+      try {
+        const [dados, avisos] = await Promise.all([
+          chamar("GET", "/api/salas"),
+          chamar("GET", "/api/eventos?limite=8"),
+        ]);
+        limite = dados.limite_temperatura;
+        if (!Object.keys(cartoes).length) montarBlocos(dados.salas);
+
+        salas = {};
+        dados.salas.forEach(s => {
+          salas[s.numero] = s;
+          const c = cartoes[s.numero];
+          c.botao.className = "sala"
+            + (s.ligado ? " ligada" : "")
+            + (s.desligado_por_sala_vazia ? " vazia" : "")
+            + (s.alerta ? " quente" : "");
+          c.botao.title = s.equipamento;
+          c.estado.textContent = textoEstado(s);
+          c.detalhe.textContent = textoDetalhe(s);
+        });
+
+        const lista = dados.salas;
+        $("totalLigadas").textContent = `${lista.filter(s => s.ligado).length} / ${lista.length}`;
+        $("totalPessoas").textContent = lista.filter(s => s.ligado && s.pessoas > 0).length;
+        $("totalVazias").textContent  = lista.filter(s => s.desligado_por_sala_vazia).length;
+        $("totalQuentes").textContent = lista.filter(s => s.alerta).length;
+        $("subtitulo").textContent = `${lista.length} salas · blocos A a F · monitorando em tempo real`;
+
+        preencherEventos($("avisos"), $("semAvisos"), avisos.eventos, true);
+        if (salaAberta) atualizarJanela();
+      } catch (e) {
+        $("subtitulo").textContent = "Sem conexão com a API. Ela está rodando? (uvicorn api:app --reload)";
+      }
+    }
+
+    // ---- janela de controle ----
+    function abrirSala(numero) {
+      salaAberta = numero;
+      const s = salas[numero];
+      // os campos de digitar so sao preenchidos ao abrir, para a atualizacao
+      // automatica nao apagar o que a pessoa esta escrevendo
+      $("jHoraLigar").value = s.hora_ligar || "";
+      $("jHoraDesligar").value = s.hora_desligar || "";
+      $("jEquipamento").value = s.equipamento;
+      avisar("");
+      $("jSecaoGrafico").hidden = true;
+      $("jEventos").replaceChildren();
+      $("janela").showModal();
+      atualizarJanela();
+    }
+
+    async function atualizarJanela() {
+      const numero = salaAberta;
+      const s = salas[numero];
+
+      $("jTitulo").textContent = `Sala ${s.numero}`;
+      $("jBloco").textContent = `Bloco ${s.bloco} · ${s.equipamento}`;
+      $("jSelo").className = "selo" + (s.ligado ? " ligado" : s.desligado_por_sala_vazia ? " vazia" : "");
+      $("jEstado").textContent = s.ligado ? "Ar ligado" : "Ar desligado";
+      $("jMotivo").textContent = s.motivo ? `${s.motivo} (${quando(s.mudou_em)})` : "Ainda não foi ligado pelo sistema.";
+
+      const botao = $("jEnergia");
+      botao.textContent = s.ligado ? "Desligar" : "Ligar";
+      botao.className = "botao " + (s.ligado ? "desligar" : "principal");
+
+      $("jPessoas").textContent = s.pessoas === null
+        ? "Ainda não verificada"
+        : `${s.pessoas === 0 ? "Ninguém" : s.pessoas} (${quando(s.ultima_verificacao)})`;
+      $("jProxima").textContent = !s.ligado ? "Só com o ar ligado"
+        : s.proxima_verificacao.replace("T", " ") <= agoraTexto() ? "Aguardando a câmera"
+        : quando(s.proxima_verificacao);
+      $("jTemperatura").textContent = s.temperatura === null ? "Sem leituras"
+        : graus(s.temperatura) + (s.alerta ? " · acima do limite" : "");
+      $("jConexao").textContent =
+        `ESP32 ${s.dispositivo_online ? "online" : "offline"} · câmera ${s.camera_online ? "online" : "offline"}`;
+
+      const [hist, leituras] = await Promise.all([
+        chamar("GET", `/api/eventos?limite=6&sala=${numero}`),
+        chamar("GET", `/api/leituras?limite=30&sala=${numero}`),
+      ]);
+      if (salaAberta !== numero) return;  // a pessoa ja abriu outra sala
+      preencherEventos($("jEventos"), $("jSemEventos"), hist.eventos, false);
+      const valores = leituras.leituras.map(l => l.temperatura);
+      $("jSecaoGrafico").hidden = valores.length < 2;
+      desenharGrafico(valores);
+    }
+
+    // data e hora de agora no mesmo formato de texto da API, para comparar
+    function agoraTexto() {
+      const d = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
+      return d.toISOString().slice(0, 19).replace("T", " ");
+    }
+
+    function avisar(texto, erro) {
+      $("jRetorno").textContent = texto;
+      $("jRetorno").className = "retorno" + (erro ? " erro" : "");
+    }
+
+    // executa uma acao da janela, mostra o resultado e recarrega a tela
+    async function acao(funcao, sucesso) {
+      try {
+        await funcao();
+        avisar(sucesso);
+        await atualizar();
+      } catch (e) {
+        avisar(e.message, true);
+      }
+    }
+
+    $("jEnergia").addEventListener("click", () => {
+      const ligar = !salas[salaAberta].ligado;
+      acao(() => chamar("POST", `/api/salas/${salaAberta}/energia`, { ligado: ligar }),
+           ligar ? "Comando de ligar enviado." : "Comando de desligar enviado.");
+    });
+
+    $("jSalvarAgenda").addEventListener("click", () => {
+      const corpo = {
+        hora_ligar: $("jHoraLigar").value || null,
+        hora_desligar: $("jHoraDesligar").value || null,
+      };
+      acao(() => chamar("PUT", `/api/salas/${salaAberta}/agenda`, corpo), "Horário salvo.");
+    });
+
+    $("jLimparAgenda").addEventListener("click", () => {
+      $("jHoraLigar").value = "";
+      $("jHoraDesligar").value = "";
+      acao(() => chamar("PUT", `/api/salas/${salaAberta}/agenda`, { hora_ligar: null, hora_desligar: null }),
+           "Horário removido.");
+    });
+
+    $("jSalvarEquipamento").addEventListener("click", () => {
+      acao(() => chamar("PUT", `/api/salas/${salaAberta}/equipamento`, { equipamento: $("jEquipamento").value }),
+           "Equipamento salvo.");
+    });
+
+    $("jFechar").addEventListener("click", () => $("janela").close());
+    $("janela").addEventListener("close", () => { salaAberta = null; });
+    // clicar fora da janela (no fundo escuro) tambem fecha
+    $("janela").addEventListener("click", e => { if (e.target === $("janela")) $("janela").close(); });
+
     // ---- grafico de linha desenhado na mao, sem depender de internet ----
     function desenharGrafico(valores) {
-      const canvas = document.getElementById("grafico");
+      if (valores.length < 2) return;
+      const canvas = $("grafico");
       const dpr = window.devicePixelRatio || 1;
-      const L = canvas.clientWidth, A = 220;
+      const L = canvas.clientWidth, A = 160;
       canvas.width = L * dpr; canvas.height = A * dpr;
       const ctx = canvas.getContext("2d");
       ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, L, A);
 
-      if (valores.length < 2) return;
-
       const pad = 34;
-      const min = Math.min(...valores, LIMITE) - 1;
-      const max = Math.max(...valores, LIMITE) + 1;
+      const min = Math.min(...valores, limite) - 1;
+      const max = Math.max(...valores, limite) + 1;
       const x = i => pad + (i / (valores.length - 1)) * (L - pad - 12);
-      const y = v => A - pad - ((v - min) / (max - min)) * (A - pad - 12);
+      const y = v => A - 16 - ((v - min) / (max - min)) * (A - 28);
 
-      const corTexto = "#8ba0b6", corLinha = "#24384f";
-
-      // eixos / grade horizontal
-      ctx.strokeStyle = corLinha; ctx.fillStyle = corTexto;
+      // grade horizontal
+      ctx.strokeStyle = "#24384f"; ctx.fillStyle = "#8ba0b6";
       ctx.font = "11px system-ui"; ctx.lineWidth = 1;
       for (let g = 0; g <= 3; g++) {
         const valor = min + (g / 3) * (max - min);
@@ -230,12 +357,10 @@
 
       // linha do limite de alerta (tracejada)
       ctx.strokeStyle = "#fb7185"; ctx.setLineDash([5, 4]);
-      ctx.beginPath(); ctx.moveTo(pad, y(LIMITE)); ctx.lineTo(L - 12, y(LIMITE)); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(pad, y(limite)); ctx.lineTo(L - 12, y(limite)); ctx.stroke();
       ctx.setLineDash([]);
 
       // linha da temperatura
-      const acento = getComputedStyle(document.documentElement)
-        .getPropertyValue("--acento").includes("alerta") ? "#fb7185" : "#2dd4bf";
       ctx.strokeStyle = "#38bdf8"; ctx.lineWidth = 2.5;
       ctx.beginPath();
       valores.forEach((v, i) => i === 0 ? ctx.moveTo(x(i), y(v)) : ctx.lineTo(x(i), y(v)));
@@ -243,7 +368,7 @@
 
       // ponto final destacado
       const ult = valores.length - 1;
-      ctx.fillStyle = valores[ult] > LIMITE ? "#fb7185" : "#2dd4bf";
+      ctx.fillStyle = valores[ult] > limite ? "#fb7185" : "#2dd4bf";
       ctx.beginPath(); ctx.arc(x(ult), y(valores[ult]), 4, 0, Math.PI * 2); ctx.fill();
     }
 
