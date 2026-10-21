@@ -4,14 +4,27 @@
   Faz o mesmo que o simulador.py faz hoje:
     1. pergunta para a API se o ar da sala deve estar ligado;
     2. quando a resposta muda, dispara o LED infravermelho para ligar ou
-       desligar a central de ar (como se fosse o controle remoto).
+       desligar a central de ar (como se fosse o controle remoto);
+    3. le a temperatura e a umidade no sensor DHT e envia para a API.
+
+  Dois jeitos de falar com a API (escolha em MODO_USB, abaixo):
+    - Wi-Fi (MODO_USB = false): o ESP32 chama a API direto pela rede.
+    - cabo USB (MODO_USB = true): o ESP32 so escreve e le no cabo, e o
+      ponte_usb.py, rodando no computador, repassa tudo para a API. Serve
+      quando o ESP32 e o computador nao estao na mesma rede.
 
   Ligacao do LED infravermelho:
-    GPIO 4 -> resistor 100 ohms -> LED IR (perna longa) ; perna curta -> GND
+    GPIO 16 (RX2) -> resistor 100 ohms -> LED IR (perna longa) ; perna curta -> GND
     (para alcance maior, use um transistor ou um modulo emissor IR pronto)
+
+  Ligacao do sensor DHT (DHT22 ou DHT11, modulo de 3 pinos):
+    VCC -> 3V3 ; GND -> GND ; DATA -> GPIO 4
+    (o sensor sem placa, de 4 pernas, precisa de um resistor de 10k entre
+     DATA e 3V3; o modulo de 3 pinos ja vem com ele)
 
   Bibliotecas (Arduino IDE > Gerenciador de Bibliotecas):
     - IRremoteESP8266   (funciona no ESP32 tambem)
+    - DHT sensor library, da Adafruit (aceite instalar o Adafruit Unified Sensor junto)
 
   Antes de gravar em cada ESP32, ajuste o bloco "Configuracao" abaixo.
 */
@@ -20,15 +33,20 @@
 #include <HTTPClient.h>
 #include <IRremoteESP8266.h>
 #include <IRac.h>
+#include <DHT.h>
 
 // ---------------------------------------------------------------------------
 // Configuracao — muda de sala para sala
 // ---------------------------------------------------------------------------
-const char* WIFI_NOME  = "NOME_DO_WIFI";
-const char* WIFI_SENHA = "SENHA_DO_WIFI";
+// true = fala com a API pelo cabo USB (precisa do ponte_usb.py rodando no PC)
+// false = fala com a API pelo Wi-Fi
+const bool MODO_USB = true;
+
+const char* WIFI_NOME  = "POCO X6 Pro 5G";
+const char* WIFI_SENHA = "12345678";
 
 // IP do computador onde a API esta rodando (uvicorn api:app --host 0.0.0.0)
-const char* URL_API = "http://192.168.0.10:8000";
+const char* URL_API = "http://10.97.37.183:8000";
 
 // Numero da sala onde este ESP32 esta instalado
 const char* SALA = "101";
@@ -39,12 +57,15 @@ const char* SALA = "101";
 // documentacao da biblioteca IRremoteESP8266.
 const decode_type_t MARCA_DO_AR = decode_type_t::LG2;
 
-const uint16_t PINO_IR = 4;          // GPIO do LED infravermelho
+const uint16_t PINO_IR = 16;         // GPIO do LED infravermelho (RX2)
+const uint8_t  PINO_DHT = 4;         // GPIO do DATA do sensor de temperatura
+const uint8_t  TIPO_DHT = DHT22;     // DHT22 (grade branca) ou DHT11 (grade azul)
 const float    TEMPERATURA_AR = 23;  // temperatura pedida ao ligar
 const unsigned long INTERVALO = 5000; // ms entre uma pergunta e outra
 
 // ---------------------------------------------------------------------------
 IRac ar(PINO_IR);
+DHT sensor(PINO_DHT, TIPO_DHT);
 
 // Ultimo estado enviado por infravermelho: -1 = nenhum ainda, 0 = desligado, 1 = ligado
 int estadoEnviado = -1;
@@ -57,7 +78,8 @@ void conectarWifi() {
     delay(500);
     Serial.print(".");
   }
-  Serial.println(" conectado!");
+  Serial.print(" conectado! IP do ESP32: ");
+  Serial.println(WiFi.localIP());
 }
 
 // Dispara o infravermelho para ligar (true) ou desligar (false) o ar.
@@ -75,7 +97,7 @@ void enviarInfravermelho(bool ligar) {
   Serial.println(ligar ? ">>> Infravermelho: LIGAR" : ">>> Infravermelho: DESLIGAR");
 }
 
-// Pergunta para a API se o ar deve estar ligado.
+// Pergunta para a API (pelo Wi-Fi) se o ar deve estar ligado.
 // Devolve 1 (ligado), 0 (desligado) ou -1 (nao conseguiu perguntar).
 int perguntarComando() {
   HTTPClient http;
@@ -92,20 +114,76 @@ int perguntarComando() {
   return resultado;
 }
 
+// No modo USB, o ponte_usb.py escreve "COMANDO 1" ou "COMANDO 0" no cabo.
+// Devolve o ultimo comando recebido, ou -1 se nao chegou nada.
+int lerComandoUsb() {
+  int resultado = -1;
+  while (Serial.available()) {
+    String linha = Serial.readStringUntil('\n');
+    linha.trim();
+    if (linha == "COMANDO 1") resultado = 1;
+    else if (linha == "COMANDO 0") resultado = 0;
+  }
+  return resultado;
+}
+
+// Le o sensor e envia a temperatura e a umidade para a API.
+void enviarLeitura() {
+  float temperatura = sensor.readTemperature();
+  float umidade     = sensor.readHumidity();
+  if (isnan(temperatura) || isnan(umidade)) {
+    Serial.println("Nao consegui ler o sensor de temperatura (confira a ligacao)");
+    return;
+  }
+
+  if (MODO_USB) {
+    // o ponte_usb.py le esta linha no cabo e repassa para a API
+    Serial.printf("LEITURA %.1f %.1f\n", temperatura, umidade);
+    return;
+  }
+
+  // o mesmo JSON que o simulador manda: {"sala":"101","temperatura":27.0,"umidade":60.0}
+  String json = String("{\"sala\":\"") + SALA + "\""
+              + ",\"temperatura\":" + String(temperatura, 1)
+              + ",\"umidade\":" + String(umidade, 1) + "}";
+
+  // mostra a leitura antes de enviar, assim da para testar o sensor sem a API
+  Serial.printf("%.1f C | %.1f%% umidade", temperatura, umidade);
+
+  HTTPClient http;
+  http.begin(String(URL_API) + "/api/leituras");
+  http.addHeader("Content-Type", "application/json");
+  int codigo = http.POST(json);
+  if (codigo == 200) {
+    Serial.println(" -> enviado");
+  } else {
+    Serial.printf(" -> a API nao aceitou (codigo %d)\n", codigo);
+  }
+  http.end();
+}
+
 void setup() {
   Serial.begin(115200);
-  conectarWifi();
+  sensor.begin();
+  if (!MODO_USB) conectarWifi();
 }
 
 void loop() {
-  conectarWifi();
+  int comando;
+  if (MODO_USB) {
+    comando = lerComandoUsb();
+  } else {
+    conectarWifi();
+    comando = perguntarComando();
+  }
 
-  int comando = perguntarComando();
   // so dispara o infravermelho quando o estado pedido muda
   if (comando != -1 && comando != estadoEnviado) {
     enviarInfravermelho(comando == 1);
     estadoEnviado = comando;
   }
+
+  enviarLeitura();
 
   delay(INTERVALO);
 }

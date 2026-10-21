@@ -2,3 +2,4 @@ fastapi
 uvicorn
 requests
 opencv-python<5
+pyserial

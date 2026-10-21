@@ -3,3 +3,4 @@ __pycache__/
 .venv/
 .venv-1/
 smac.db
+ponte_usb.py

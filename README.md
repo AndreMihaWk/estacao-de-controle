@@ -54,6 +54,7 @@ troque `MINUTOS_COM_PESSOAS` e `MINUTOS_SEM_PESSOAS` por valores pequenos.
 | `simulador.py` | dispositivo de mentira de uma sala |
 | `camera.py` | conta as pessoas pela webcam |
 | `esp32/esp32_sala.ino` | código do ESP32 de verdade (um por sala) |
+| `ponte_usb.py` | liga o ESP32 à API pelo cabo USB, quando não há rede em comum |
 
 ## Como rodar (passo a passo)
 
@@ -91,6 +92,14 @@ infravermelho e a câmera faz a primeira verificação.
 
 Para o ESP32 e outros computadores alcançarem a API pela rede, suba o
 servidor com `uvicorn api:app --host 0.0.0.0`.
+
+Se o ESP32 e o computador não estiverem na mesma rede (por exemplo: o PC no
+celular pelo cabo USB e o ESP32 no hotspot Wi-Fi), use a ponte pelo cabo:
+grave o ESP32 com `MODO_USB = true`, feche o Monitor Serial da Arduino IDE e rode
+
+```bash
+python ponte_usb.py          # ESP32 na COM6, sala 101
+```
 
 ## Endereços da API (para explicar no relatório)
 
