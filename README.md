@@ -49,11 +49,12 @@ troque `MINUTOS_COM_PESSOAS` e `MINUTOS_SEM_PESSOAS` por valores pequenos.
 |---------|-------|
 | `api.py` | o servidor: recebe dados, aplica as regras e a agenda |
 | `banco.py` | todas as funções que falam com o banco `smac.db` |
+| `codigos_ar.py` | banco de códigos: marca do ar → protocolo infravermelho |
 | `templates/dashboard.html` | o site (estrutura e comportamento) |
 | `static/dashboard_style.css` | a aparência do site |
 | `simulador.py` | dispositivo de mentira de uma sala |
 | `camera.py` | conta as pessoas pela webcam |
-| `esp32/esp32_sala.ino` | código do ESP32 de verdade (um por sala) |
+| `esp32/esp32_sala/esp32_sala.ino` | código do ESP32 de verdade (um por sala) |
 | `ponte_usb.py` | liga o ESP32 à API pelo cabo USB, quando não há rede em comum |
 
 ## Como rodar (passo a passo)
@@ -109,8 +110,12 @@ python ponte_usb.py          # ESP32 na COM6, sala 101
 | POST | `/api/salas/{sala}/energia` | site | ligar / desligar o ar |
 | PUT  | `/api/salas/{sala}/agenda` | site | programar horário |
 | PUT  | `/api/salas/{sala}/equipamento` | site | nome do equipamento da sala |
+| GET  | `/api/marcas` | site | banco de códigos: marcas de ar que o infravermelho controla |
+| PUT  | `/api/salas/{sala}/marca` | site | escolher a marca do ar (código infravermelho) da sala |
+| POST | `/api/salas/{sala}/teste-marca` | site | testar uma marca: o ESP32 manda ligar/desligar uma vez nela |
+| PUT  | `/api/salas/{sala}/temperatura-ar` | site | temperatura que o ar deve manter (16 a 30 °C) |
 | GET  | `/api/eventos` | site | avisos (o que o sistema fez) |
-| GET  | `/api/salas/{sala}/comando` | ESP32 | "o ar deve estar ligado?" |
+| GET  | `/api/salas/{sala}/comando` | ESP32 | "o ar deve estar ligado? em quantos graus? em qual código?" |
 | POST | `/api/leituras` | ESP32 | enviar temperatura e umidade |
 | GET  | `/api/salas/{sala}/verificacao` | câmera | "é hora de verificar?" |
 | POST | `/api/salas/{sala}/presenca` | câmera | informar quantas pessoas viu |
@@ -127,6 +132,6 @@ Com o servidor no ar, a documentação automática da API fica em
 
 ## Próximo passo (evolução)
 
-Gravar o `esp32/esp32_sala.ino` em um ESP32 de verdade (ajustando Wi-Fi, sala
+Gravar o `esp32/esp32_sala/esp32_sala.ino` em um ESP32 de verdade (ajustando Wi-Fi, sala
 e a marca do ar-condicionado) e, depois, trocar o envio por HTTP pelo
 protocolo **MQTT** (o mais usado em IoT).

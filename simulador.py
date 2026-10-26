@@ -10,7 +10,7 @@ arquivo faz o papel dele em uma sala:
 
 Isso e o que permite construir e testar o sistema INTEIRO hoje, sem comprar
 nada. Quando o ESP32 chegar, e so ele passar a chamar os mesmos enderecos
-(veja esp32/esp32_sala.ino) e o resto do sistema nem percebe a diferenca.
+(veja esp32/esp32_sala/esp32_sala.ino) e o resto do sistema nem percebe a diferenca.
 
 Como usar (com a API ja rodando em outro terminal):
 

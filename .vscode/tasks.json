@@ -1,0 +1,43 @@
+{
+  // Tarefas do projeto: Ctrl+Shift+P > "Tasks: Run Task" e escolha uma.
+  // A porta do ESP32 e a COM6; se aparecer outra no Gerenciador de
+  // Dispositivos, troque "COM6" abaixo (e rode a ponte com: python ponte_usb.py COMx).
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "1. API (site em http://127.0.0.1:8000)",
+      "type": "process",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"],
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated" }
+    },
+    {
+      "label": "2. ESP32: compilar e gravar",
+      "type": "process",
+      "command": "${env:LOCALAPPDATA}\\Programs\\Arduino IDE\\resources\\app\\lib\\backend\\resources\\arduino-cli.exe",
+      "args": ["compile", "--upload", "-p", "COM6", "--fqbn", "esp32:esp32:esp32", "${workspaceFolder}\\esp32\\esp32_sala"],
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "clear": true }
+    },
+    {
+      "label": "3. Ponte USB (ESP32 <-> API)",
+      "type": "process",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+      "args": ["ponte_usb.py", "COM6", "101"],
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated" }
+    },
+    {
+      "label": "ESP32: Monitor Serial (teste de marcas pelo teclado)",
+      "type": "process",
+      "command": "${env:LOCALAPPDATA}\\Programs\\Arduino IDE\\resources\\app\\lib\\backend\\resources\\arduino-cli.exe",
+      "args": ["monitor", "-p", "COM6", "--config", "baudrate=115200"],
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "focus": true }
+    }
+  ]
+}

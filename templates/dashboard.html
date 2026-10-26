@@ -53,6 +53,16 @@
     </div>
     <p class="motivo" id="jMotivo"></p>
 
+    <div class="secao">
+      <h4>Temperatura do ar-condicionado</h4>
+      <div class="termostato">
+        <button class="botao" id="jMenos" aria-label="Diminuir a temperatura">−</button>
+        <span class="graus-ar" id="jGrausAr">— °C</span>
+        <button class="botao" id="jMais" aria-label="Aumentar a temperatura">+</button>
+      </div>
+      <p class="dica" id="jDicaGraus"></p>
+    </div>
+
     <dl class="dados">
       <div><dt>Pessoas na última verificação</dt><dd id="jPessoas">—</dd></div>
       <div><dt>Próxima verificação</dt><dd id="jProxima">—</dd></div>
@@ -78,6 +88,22 @@
       </div>
     </div>
 
+    <div class="secao">
+      <h4>Código infravermelho (marca do ar)</h4>
+      <div class="campos">
+        <label class="largo">Marca <select id="jMarca"></select></label>
+        <button class="botao" id="jSalvarMarca">Salvar</button>
+      </div>
+      <div class="campos teste">
+        <button class="botao discreto" id="jTestarLigar">Testar ligar</button>
+        <button class="botao discreto" id="jTestarDesligar">Testar desligar</button>
+      </div>
+      <p class="dica">Não sabe qual é? Com o LED apontado para o ar, escolha uma marca e
+        clique em <b>Testar ligar</b>. Se o ar não apitar em uns 5 segundos, tente a próxima.
+        Quando ligar, confira com <b>Testar desligar</b> e clique em <b>Salvar</b>.
+        O teste não muda nada na sala; só o Salvar troca a marca.</p>
+    </div>
+
     <p class="retorno" id="jRetorno"></p>
 
     <div class="secao" id="jSecaoGrafico" hidden>
@@ -99,6 +125,10 @@
     let cartoes = {};        // numero -> elementos do cartao da sala na tela
     let salaAberta = null;   // numero da sala com a janela aberta
     let limite = 28.0;       // limite de temperatura (a API informa o valor real)
+    let marcasCarregadas = false;  // o seletor de marcas so e montado uma vez
+    let grausMin = 16, grausMax = 30;  // faixa de temperatura do ar (a API informa)
+    let grausAr = null;      // temperatura do ar mostrada na janela
+    let esperaGraus = null;  // espera para salvar a temperatura depois do ultimo clique
 
     // ---- pequenos ajudantes ----
     function criar(tag, classe, texto) {
@@ -194,7 +224,10 @@
           chamar("GET", "/api/eventos?limite=8"),
         ]);
         limite = dados.limite_temperatura;
+        grausMin = dados.temperatura_ar_minima;
+        grausMax = dados.temperatura_ar_maxima;
         if (!Object.keys(cartoes).length) montarBlocos(dados.salas);
+        if (!marcasCarregadas) await carregarMarcas();
 
         salas = {};
         dados.salas.forEach(s => {
@@ -223,6 +256,17 @@
       }
     }
 
+    // ---- banco de codigos: preenche o seletor de marcas do ar ----
+    async function carregarMarcas() {
+      const dados = await chamar("GET", "/api/marcas");
+      $("jMarca").replaceChildren(...dados.marcas.map(m => {
+        const opcao = criar("option", "", m.nome);
+        opcao.value = m.id;
+        return opcao;
+      }));
+      marcasCarregadas = true;
+    }
+
     // ---- janela de controle ----
     function abrirSala(numero) {
       salaAberta = numero;
@@ -232,6 +276,8 @@
       $("jHoraLigar").value = s.hora_ligar || "";
       $("jHoraDesligar").value = s.hora_desligar || "";
       $("jEquipamento").value = s.equipamento;
+      $("jMarca").value = s.marca_ar;
+      grausAr = s.temperatura_ar;
       avisar("");
       $("jSecaoGrafico").hidden = true;
       $("jEventos").replaceChildren();
@@ -244,9 +290,12 @@
       const s = salas[numero];
 
       $("jTitulo").textContent = `Sala ${s.numero}`;
-      $("jBloco").textContent = `Bloco ${s.bloco} · ${s.equipamento}`;
+      $("jBloco").textContent = `Bloco ${s.bloco} · ${s.equipamento} · código ${s.marca_nome}`;
       $("jSelo").className = "selo" + (s.ligado ? " ligado" : s.desligado_por_sala_vazia ? " vazia" : "");
-      $("jEstado").textContent = s.ligado ? "Ar ligado" : "Ar desligado";
+      $("jEstado").textContent = s.ligado ? `Ar ligado · ${s.temperatura_ar} °C` : "Ar desligado";
+      // enquanto a pessoa esta clicando em − / +, a tela mostra o valor dela
+      if (esperaGraus === null) grausAr = s.temperatura_ar;
+      mostrarGraus();
       $("jMotivo").textContent = s.motivo ? `${s.motivo} (${quando(s.mudou_em)})` : "Ainda não foi ligado pelo sistema.";
 
       const botao = $("jEnergia");
@@ -322,6 +371,48 @@
       acao(() => chamar("PUT", `/api/salas/${salaAberta}/equipamento`, { equipamento: $("jEquipamento").value }),
            "Equipamento salvo.");
     });
+
+    $("jSalvarMarca").addEventListener("click", () => {
+      const ligado = salas[salaAberta].ligado;
+      acao(() => chamar("PUT", `/api/salas/${salaAberta}/marca`, { marca: $("jMarca").value }),
+           ligado ? "Marca salva. O ESP32 vai mandar o comando de ligar nesse código."
+                  : "Marca salva. O ESP32 vai mandar o comando de desligar nesse código.");
+    });
+
+    // ---- teste de marca: o ESP32 dispara uma vez, sem salvar a marca ----
+    function testarMarca(ligar) {
+      const nome = $("jMarca").selectedOptions[0].textContent;
+      acao(() => chamar("POST", `/api/salas/${salaAberta}/teste-marca`, { marca: $("jMarca").value, ligado: ligar }),
+           `Teste enviado: ${ligar ? "ligar" : "desligar"} em ${nome}. Olhe o ar nos próximos segundos.`);
+    }
+    $("jTestarLigar").addEventListener("click", () => testarMarca(true));
+    $("jTestarDesligar").addEventListener("click", () => testarMarca(false));
+
+    // ---- temperatura do ar: − e + mudam na tela e salvam 0,6 s depois do ultimo clique ----
+    function mostrarGraus() {
+      const s = salas[salaAberta];
+      $("jGrausAr").textContent = `${grausAr} °C`;
+      $("jMenos").disabled = grausAr <= grausMin;
+      $("jMais").disabled = grausAr >= grausMax;
+      $("jDicaGraus").textContent = s.ligado
+        ? "O ESP32 manda a temperatura nova para o ar em alguns segundos."
+        : "O ar está desligado: esta temperatura vale quando ele ligar.";
+    }
+
+    function mudarGraus(passo) {
+      const numero = salaAberta;
+      grausAr = Math.min(grausMax, Math.max(grausMin, grausAr + passo));
+      const graus = grausAr;
+      mostrarGraus();
+      clearTimeout(esperaGraus);
+      esperaGraus = setTimeout(() => {
+        esperaGraus = null;
+        acao(() => chamar("PUT", `/api/salas/${numero}/temperatura-ar`, { graus }),
+             `Temperatura do ar: ${graus} °C.`);
+      }, 600);
+    }
+    $("jMenos").addEventListener("click", () => mudarGraus(-1));
+    $("jMais").addEventListener("click", () => mudarGraus(+1));
 
     $("jFechar").addEventListener("click", () => $("janela").close());
     $("janela").addEventListener("close", () => { salaAberta = null; });

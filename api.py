@@ -11,8 +11,11 @@ Este e o backend que roda no servidor (a parte "Cloud" do projeto). Ele:
 
 Quem conversa com a API:
 
-  - o SITE        liga/desliga, programa horario e mostra os avisos
-  - o ESP32       pergunta "o ar deve estar ligado?" e dispara o infravermelho
+  - o SITE        liga/desliga, escolhe a temperatura do ar, testa marcas,
+                  programa horario e mostra os avisos
+  - o ESP32       pergunta "o ar deve estar ligado? em quantos graus?" e
+                  dispara o infravermelho no codigo da marca da sala
+                  (banco de codigos: codigos_ar.py)
   - a CAMERA      pergunta "e hora de verificar?" e responde quantas pessoas viu
 
 Feito com FastAPI. Para rodar:
@@ -33,6 +36,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import banco
+import codigos_ar
 
 # ---------------------------------------------------------------------------
 # Configuracao (Industria 4.0: as regras de decisao automatica ficam aqui)
@@ -51,8 +55,16 @@ MOTIVO_SALA_VAZIA = "Desligado automaticamente: sala vazia em duas verificaçõe
 # Um dispositivo e considerado "online" se falou com a API nos ultimos segundos.
 SEGUNDOS_ONLINE = 30
 
+# Faixa de temperatura que o site deixa pedir ao ar-condicionado.
+TEMPERATURA_AR_MINIMA = 16
+TEMPERATURA_AR_MAXIMA = 30
+
 # Guarda quando cada ESP32 e cada camera falaram com a API pela ultima vez.
 ultimo_contato = {"dispositivo": {}, "camera": {}}
+
+# Teste de marca pedido no site e ainda nao entregue ao ESP32, por sala.
+# Ex.: {"101": {"ligado": True, "protocolo": "MIRAGE", "modelo": 1}}
+testes_pendentes = {}
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +91,22 @@ class Agenda(BaseModel):
 class Equipamento(BaseModel):
     """Nome/modelo do equipamento instalado na sala."""
     equipamento: str = Field(min_length=1, max_length=60)
+
+
+class MarcaAr(BaseModel):
+    """Marca do ar da sala: um id do banco de codigos (codigos_ar.py)."""
+    marca: str
+
+
+class TemperaturaAr(BaseModel):
+    """Temperatura (em graus inteiros) que o ar deve manter."""
+    graus: int = Field(ge=TEMPERATURA_AR_MINIMA, le=TEMPERATURA_AR_MAXIMA)
+
+
+class TesteMarca(BaseModel):
+    """Pedido do site para testar uma marca: mandar ligar ou desligar nela."""
+    marca: str
+    ligado: bool
 
 
 class Presenca(BaseModel):
@@ -215,6 +243,9 @@ def para_o_painel(sala):
     sala["camera_online"] = esta_online("camera", numero)
     temperatura = sala.get("temperatura")
     sala["alerta"] = temperatura is not None and temperatura > LIMITE_TEMPERATURA
+    codigo = codigos_ar.da_sala(sala)
+    sala["marca_ar"] = codigo["id"]
+    sala["marca_nome"] = codigo["nome"]
     return sala
 
 
@@ -240,6 +271,8 @@ def salas():
     """Todas as salas, com o estado do ar, agenda, presenca e temperatura."""
     return {
         "limite_temperatura": LIMITE_TEMPERATURA,
+        "temperatura_ar_minima": TEMPERATURA_AR_MINIMA,
+        "temperatura_ar_maxima": TEMPERATURA_AR_MAXIMA,
         "salas": [para_o_painel(sala) for sala in banco.listar_salas()],
     }
 
@@ -277,6 +310,65 @@ def renomear_equipamento(numero: str, dados: Equipamento):
     return para_o_painel(banco.buscar_sala(numero))
 
 
+@app.get("/api/marcas")
+def marcas():
+    """O banco de codigos: as marcas de ar que o infravermelho sabe controlar."""
+    return {"padrao": codigos_ar.PADRAO, "marcas": codigos_ar.listar()}
+
+
+@app.put("/api/salas/{numero}/marca")
+def trocar_marca(numero: str, dados: MarcaAr):
+    """
+    Escolhe a marca do ar da sala. O ESP32 recebe o protocolo novo na proxima
+    pergunta e, se o ar estiver ligado, manda o comando de novo no codigo novo:
+    assim da para testar marca por marca ate o ar responder.
+    """
+    sala_ou_404(numero)
+    codigo = codigos_ar.buscar(dados.marca)
+    if codigo is None:
+        raise HTTPException(status_code=422, detail="Essa marca não está no banco de códigos.")
+    banco.atualizar_sala(numero, marca_ar=codigo["id"])
+    banco.registrar_evento(numero, "MARCA", f"Código infravermelho trocado para {codigo['nome']}.")
+    return para_o_painel(banco.buscar_sala(numero))
+
+
+@app.post("/api/salas/{numero}/teste-marca")
+def testar_marca(numero: str, dados: TesteMarca):
+    """
+    Manda o ESP32 disparar UMA vez o comando de ligar (ou desligar) no codigo
+    de uma marca, sem trocar a marca salva da sala. Serve para descobrir a
+    marca certa: quando o ar responder, e so salvar essa marca.
+    """
+    sala_ou_404(numero)
+    codigo = codigos_ar.buscar(dados.marca)
+    if codigo is None:
+        raise HTTPException(status_code=422, detail="Essa marca não está no banco de códigos.")
+    if not esta_online("dispositivo", numero):
+        raise HTTPException(
+            status_code=409,
+            detail="O ESP32 desta sala está offline. Ligue o ESP32 (e a ponte USB, se usar o cabo).",
+        )
+    testes_pendentes[numero] = {
+        "ligado": dados.ligado,
+        "protocolo": codigo["protocolo"],
+        "modelo": codigo["modelo"],
+    }
+    acao = "ligar" if dados.ligado else "desligar"
+    banco.registrar_evento(numero, "TESTE", f"Teste do código {codigo['nome']}: {acao}.")
+    return {"mensagem": f"Teste enviado: {acao} no código {codigo['nome']}."}
+
+
+@app.put("/api/salas/{numero}/temperatura-ar")
+def ajustar_temperatura(numero: str, dados: TemperaturaAr):
+    """
+    Escolhe a temperatura do ar da sala. Se o ar estiver ligado, o ESP32
+    manda o comando de novo com a temperatura nova na proxima pergunta.
+    """
+    sala_ou_404(numero)
+    banco.atualizar_sala(numero, temperatura_ar=dados.graus)
+    return para_o_painel(banco.buscar_sala(numero))
+
+
 @app.get("/api/eventos")
 def eventos(limite: int = 20, sala: Optional[str] = None):
     """Ultimos acontecimentos (avisos do painel). Opcional: so de uma sala."""
@@ -304,11 +396,25 @@ def status(sala: str = "101"):
 def comando(numero: str):
     """
     O ESP32 chama este endereco de tempos em tempos para saber se o ar deve
-    estar ligado. Quando a resposta muda, ele dispara o infravermelho.
+    estar ligado, em quantos graus e em qual codigo infravermelho (protocolo)
+    falar com ele. Quando a resposta muda, ele dispara o infravermelho.
+
+    Se o site pediu um teste de marca, ele vem junto (uma unica vez) nos
+    campos teste_*; teste_ligado = -1 quando nao ha teste.
     """
     sala = sala_ou_404(numero)
     ultimo_contato["dispositivo"][numero] = time.time()
-    return {"ligado": bool(sala["ligado"])}
+    codigo = codigos_ar.da_sala(sala)
+    teste = testes_pendentes.pop(numero, None)
+    return {
+        "ligado": bool(sala["ligado"]),
+        "protocolo": codigo["protocolo"],
+        "modelo": codigo["modelo"],
+        "graus": sala["temperatura_ar"],
+        "teste_ligado": int(teste["ligado"]) if teste else -1,
+        "teste_protocolo": teste["protocolo"] if teste else "",
+        "teste_modelo": teste["modelo"] if teste else 0,
+    }
 
 
 @app.post("/api/leituras")

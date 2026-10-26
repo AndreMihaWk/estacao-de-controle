@@ -76,7 +76,9 @@ def iniciar_banco():
             pessoas             INTEGER,  -- resultado da ultima verificacao da camera
             ultima_verificacao  TEXT,
             proxima_verificacao TEXT,
-            ausencias           INTEGER NOT NULL DEFAULT 0  -- verificacoes seguidas sem ninguem
+            ausencias           INTEGER NOT NULL DEFAULT 0, -- verificacoes seguidas sem ninguem
+            marca_ar            TEXT,     -- id no banco de codigos (codigos_ar.py); vazio = padrao
+            temperatura_ar      INTEGER NOT NULL DEFAULT 23 -- graus pedidos ao ar (escolhidos no site)
         );
 
         CREATE TABLE IF NOT EXISTS eventos (
@@ -88,6 +90,15 @@ def iniciar_banco():
         );
         """
     )
+    # bancos criados antes destas colunas existirem ganham elas aqui
+    colunas = [coluna["name"] for coluna in conexao.execute("PRAGMA table_info(salas)")]
+    if "marca_ar" not in colunas:
+        conexao.execute("ALTER TABLE salas ADD COLUMN marca_ar TEXT")
+    if "temperatura_ar" not in colunas:
+        conexao.execute(
+            "ALTER TABLE salas ADD COLUMN temperatura_ar INTEGER NOT NULL DEFAULT 23"
+        )
+
     # INSERT OR IGNORE: so cadastra as salas que ainda nao estao na tabela
     conexao.executemany(
         "INSERT OR IGNORE INTO salas (numero, bloco, equipamento) VALUES (?, ?, ?)",
