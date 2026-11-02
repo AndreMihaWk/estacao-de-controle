@@ -10,9 +10,11 @@ Aqui ficam TODAS as funcoes que conversam com o banco. O resto do sistema
 o codigo organizado e facil de explicar no relatorio.
 
 Tabelas:
-  salas    -> uma linha por sala (estado do ar, agenda, presenca)
-  leituras -> historico de temperatura/umidade enviado pelos dispositivos
-  eventos  -> tudo o que aconteceu (ligou, desligou, sala vazia...)
+  salas        -> uma linha por sala (estado do ar, agenda, presenca),
+                  cadastrada pelo usuario no site
+  dispositivos -> um ESP32 por linha (pelo MAC) e a sala escolhida para ele
+  leituras     -> historico de temperatura/umidade enviado pelos dispositivos
+  eventos      -> tudo o que aconteceu (ligou, desligou, sala vazia...)
 """
 
 import sqlite3
@@ -21,23 +23,10 @@ from datetime import datetime
 # Nome do arquivo do banco. Fica na mesma pasta do projeto.
 ARQUIVO_BANCO = "smac.db"
 
-# Quantas salas cada bloco tem. A letra do bloco define a centena:
-# Bloco A -> 101, 102...   Bloco B -> 201, 202...   Bloco F -> 601, 602...
-BLOCOS = {"A": 10, "B": 10, "C": 20, "D": 20, "E": 20, "F": 20}
-
 
 def agora():
     """Data e hora atuais no formato de texto usado em todo o banco."""
     return datetime.now().isoformat(timespec="seconds")
-
-
-def gerar_salas():
-    """Monta a lista (numero, bloco) de todas as salas, seguindo o padrao."""
-    salas = []
-    for posicao, (bloco, quantidade) in enumerate(BLOCOS.items(), start=1):
-        for n in range(1, quantidade + 1):
-            salas.append((str(posicao * 100 + n), bloco))
-    return salas
 
 
 def conectar():
@@ -49,8 +38,8 @@ def conectar():
 
 def iniciar_banco():
     """
-    Cria as tabelas se ainda nao existirem e cadastra todas as salas.
-    Deve ser chamada uma vez quando o sistema sobe.
+    Cria as tabelas se ainda nao existirem. As salas nao vem prontas: o
+    usuario cadastra cada uma no site. Deve ser chamada quando o sistema sobe.
     """
     conexao = conectar()
     conexao.executescript(
@@ -88,6 +77,12 @@ def iniciar_banco():
             mensagem TEXT NOT NULL,
             momento  TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS dispositivos (
+            id        TEXT PRIMARY KEY,  -- MAC do ESP32, ex.: "24:6F:28:AB:CD:EF"
+            sala      TEXT,              -- sala escolhida no site; vazio = ainda sem sala
+            criado_em TEXT NOT NULL      -- quando o ESP32 falou com a API pela primeira vez
+        );
         """
     )
     # bancos criados antes destas colunas existirem ganham elas aqui
@@ -98,12 +93,6 @@ def iniciar_banco():
         conexao.execute(
             "ALTER TABLE salas ADD COLUMN temperatura_ar INTEGER NOT NULL DEFAULT 23"
         )
-
-    # INSERT OR IGNORE: so cadastra as salas que ainda nao estao na tabela
-    conexao.executemany(
-        "INSERT OR IGNORE INTO salas (numero, bloco, equipamento) VALUES (?, ?, ?)",
-        [(numero, bloco, "Central de ar") for numero, bloco in gerar_salas()],
-    )
     conexao.commit()
     conexao.close()
 
@@ -179,6 +168,36 @@ def buscar_sala(numero):
     return dict(linha) if linha else None
 
 
+def criar_sala(numero, bloco, equipamento):
+    """Cadastra uma sala nova. Retorna False se ja existe sala com esse numero."""
+    conexao = conectar()
+    try:
+        conexao.execute(
+            "INSERT INTO salas (numero, bloco, equipamento) VALUES (?, ?, ?)",
+            (numero, bloco, equipamento),
+        )
+        conexao.commit()
+        return True
+    except sqlite3.IntegrityError:  # numero repetido (chave primaria)
+        return False
+    finally:
+        conexao.close()
+
+
+def excluir_sala(numero):
+    """
+    Apaga a sala e suas leituras e eventos. O ESP32 que estava nela fica sem
+    sala (volta a aparecer como "sem sala" no site, pronto para outra).
+    """
+    conexao = conectar()
+    conexao.execute("DELETE FROM salas WHERE numero = ?", (numero,))
+    conexao.execute("DELETE FROM leituras WHERE sala = ?", (numero,))
+    conexao.execute("DELETE FROM eventos WHERE sala = ?", (numero,))
+    conexao.execute("UPDATE dispositivos SET sala = NULL WHERE sala = ?", (numero,))
+    conexao.commit()
+    conexao.close()
+
+
 def atualizar_sala(numero, **campos):
     """
     Altera uma ou mais colunas de uma sala. Exemplo:
@@ -189,6 +208,67 @@ def atualizar_sala(numero, **campos):
     conexao.execute(
         f"UPDATE salas SET {colunas} WHERE numero = ?",
         (*campos.values(), numero),
+    )
+    conexao.commit()
+    conexao.close()
+
+
+# ---------------------------------------------------------------------------
+# Dispositivos (os ESP32 e a sala de cada um)
+# ---------------------------------------------------------------------------
+def registrar_dispositivo(id_dispositivo):
+    """
+    Anota o ESP32 na primeira vez que ele fala com a API (ainda sem sala) e
+    devolve o registro dele, com a sala escolhida no site (ou None).
+    """
+    conexao = conectar()
+    conexao.execute(
+        "INSERT OR IGNORE INTO dispositivos (id, sala, criado_em) VALUES (?, NULL, ?)",
+        (id_dispositivo, agora()),
+    )
+    conexao.commit()
+    linha = conexao.execute(
+        "SELECT * FROM dispositivos WHERE id = ?", (id_dispositivo,)
+    ).fetchone()
+    conexao.close()
+    return dict(linha)
+
+
+def listar_dispositivos():
+    """Todos os ESP32 que ja falaram com a API, os mais novos primeiro."""
+    conexao = conectar()
+    linhas = conexao.execute(
+        "SELECT * FROM dispositivos ORDER BY criado_em DESC"
+    ).fetchall()
+    conexao.close()
+    return [dict(linha) for linha in linhas]
+
+
+def buscar_dispositivo(id_dispositivo):
+    """Retorna um ESP32 pelo id (MAC), ou None se ele nunca falou com a API."""
+    conexao = conectar()
+    linha = conexao.execute(
+        "SELECT * FROM dispositivos WHERE id = ?", (id_dispositivo,)
+    ).fetchone()
+    conexao.close()
+    return dict(linha) if linha else None
+
+
+def dispositivo_da_sala(numero):
+    """Retorna o ESP32 ligado a uma sala, ou None se a sala nao tem ESP32."""
+    conexao = conectar()
+    linha = conexao.execute(
+        "SELECT * FROM dispositivos WHERE sala = ?", (numero,)
+    ).fetchone()
+    conexao.close()
+    return dict(linha) if linha else None
+
+
+def vincular_dispositivo(id_dispositivo, numero):
+    """Coloca o ESP32 numa sala (numero) ou tira de qualquer sala (None)."""
+    conexao = conectar()
+    conexao.execute(
+        "UPDATE dispositivos SET sala = ? WHERE id = ?", (numero, id_dispositivo)
     )
     conexao.commit()
     conexao.close()

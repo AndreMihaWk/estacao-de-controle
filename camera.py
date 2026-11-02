@@ -51,9 +51,10 @@ QUADROS = 8
 # corpo inteiro (HOG) para quem esta em pe e rosto (Haar) para quem esta sentado.
 detector_corpo = cv2.HOGDescriptor()
 detector_corpo.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
-detector_rosto = cv2.CascadeClassifier(
-    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-)
+# (o OpenCV antigo do apt, usado na TV box, nao tem cv2.data: ali os arquivos
+# ficam em /usr/share/opencv/haarcascades, do pacote opencv-data)
+PASTA_HAAR = cv2.data.haarcascades if hasattr(cv2, "data") else "/usr/share/opencv/haarcascades/"
+detector_rosto = cv2.CascadeClassifier(PASTA_HAAR + "haarcascade_frontalface_default.xml")
 
 
 def pessoas_no_quadro(quadro):

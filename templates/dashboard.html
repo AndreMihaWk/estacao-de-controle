@@ -26,6 +26,27 @@
       <p class="vazio" id="semAvisos">Nada aconteceu ainda. Clique numa sala para ligar o ar.</p>
     </section>
 
+    <section class="caixa config">
+      <h2>Configuração</h2>
+      <h4>Nova sala</h4>
+      <div class="campos">
+        <label>Número <input type="text" id="nNumero" maxlength="10" placeholder="205"></label>
+        <label>Bloco <input type="text" id="nBloco" maxlength="20" placeholder="B"></label>
+        <label class="largo">Equipamento <input type="text" id="nEquipamento" maxlength="60" placeholder="Split Philco 12000 BTU"></label>
+        <button class="botao principal" id="nCadastrar">Cadastrar sala</button>
+      </div>
+      <p class="retorno" id="nRetorno"></p>
+
+      <div class="secao">
+        <h4>ESP32 conectados</h4>
+        <ul class="lista-dispositivos" id="dispositivos"></ul>
+        <p class="vazio" id="semDispositivos">Nenhum ESP32 falou com a API ainda. Ligue um ESP32 no Wi-Fi e ele aparece aqui.</p>
+        <p class="dica">Um ESP32 novo aparece aqui sozinho, sem sala. Escolha a sala onde ele está
+          instalado e clique em <b>Salvar</b>: ele passa a medir e a controlar o ar dessa sala.</p>
+        <p class="retorno" id="dRetorno"></p>
+      </div>
+    </section>
+
     <p class="legenda">
       <span><i class="l-ligada"></i>Ar ligado</span>
       <span><i></i>Ar desligado</span>
@@ -116,6 +137,13 @@
       <ul class="lista-eventos" id="jEventos"></ul>
       <p class="vazio" id="jSemEventos">Nenhum registro para esta sala.</p>
     </div>
+
+    <div class="secao">
+      <h4>Excluir sala</h4>
+      <button class="botao desligar" id="jExcluir">Excluir esta sala</button>
+      <p class="dica">Apaga a sala, as leituras e o histórico dela. O ESP32 da sala fica sem sala
+        e pode ser colocado em outra.</p>
+    </div>
   </dialog>
 
   <script>
@@ -123,6 +151,8 @@
 
     let salas = {};          // numero -> dados da sala (vindos da API)
     let cartoes = {};        // numero -> elementos do cartao da sala na tela
+    let chaveSalas = null;   // lista de salas desenhada; mudou = redesenhar os blocos
+    let linhasEsp = {};      // MAC do ESP32 -> elementos da linha dele na lista
     let salaAberta = null;   // numero da sala com a janela aberta
     let limite = 28.0;       // limite de temperatura (a API informa o valor real)
     let marcasCarregadas = false;  // o seletor de marcas so e montado uma vez
@@ -178,15 +208,18 @@
       return partes.join(" · ");
     }
 
-    // ---- monta os blocos e as salas (uma unica vez) ----
+    // ---- monta os blocos e as salas (de novo sempre que uma sala e cadastrada ou excluida) ----
     function montarBlocos(lista) {
+      cartoes = {};
+      $("blocos").replaceChildren();
       const porBloco = {};
       lista.forEach(s => (porBloco[s.bloco] = porBloco[s.bloco] || []).push(s));
 
       for (const [bloco, doBloco] of Object.entries(porBloco)) {
         const secao = criar("section", "bloco");
         const titulo = criar("h2", "", `Bloco ${bloco} `);
-        titulo.append(criar("span", "", `· salas ${doBloco[0].numero} a ${doBloco[doBloco.length - 1].numero}`));
+        const primeira = doBloco[0].numero, ultima = doBloco[doBloco.length - 1].numero;
+        titulo.append(criar("span", "", doBloco.length === 1 ? `· sala ${primeira}` : `· salas ${primeira} a ${ultima}`));
         const grade = criar("div", "salas");
 
         doBloco.forEach(s => {
@@ -219,14 +252,20 @@
     // ---- busca tudo na API e atualiza a tela ----
     async function atualizar() {
       try {
-        const [dados, avisos] = await Promise.all([
+        const [dados, avisos, esp] = await Promise.all([
           chamar("GET", "/api/salas"),
           chamar("GET", "/api/eventos?limite=8"),
+          chamar("GET", "/api/dispositivos"),
         ]);
         limite = dados.limite_temperatura;
         grausMin = dados.temperatura_ar_minima;
         grausMax = dados.temperatura_ar_maxima;
-        if (!Object.keys(cartoes).length) montarBlocos(dados.salas);
+        const chave = dados.salas.map(s => `${s.numero}/${s.bloco}`).join(",");
+        const salasMudaram = chave !== chaveSalas;
+        if (salasMudaram) {
+          chaveSalas = chave;
+          montarBlocos(dados.salas);
+        }
         if (!marcasCarregadas) await carregarMarcas();
 
         salas = {};
@@ -247,12 +286,90 @@
         $("totalPessoas").textContent = lista.filter(s => s.ligado && s.pessoas > 0).length;
         $("totalVazias").textContent  = lista.filter(s => s.desligado_por_sala_vazia).length;
         $("totalQuentes").textContent = lista.filter(s => s.alerta).length;
-        $("subtitulo").textContent = `${lista.length} salas · blocos A a F · monitorando em tempo real`;
+        const blocos = new Set(lista.map(s => s.bloco)).size;
+        $("subtitulo").textContent = lista.length === 0
+          ? "Nenhuma sala cadastrada ainda. Cadastre a primeira em Configuração."
+          : `${lista.length} sala(s) · ${blocos} bloco(s) · monitorando em tempo real`;
 
         preencherEventos($("avisos"), $("semAvisos"), avisos.eventos, true);
+        mostrarDispositivos(esp.dispositivos, dados.salas, salasMudaram);
+        if (salaAberta && !salas[salaAberta]) $("janela").close();  // a sala foi excluida
         if (salaAberta) atualizarJanela();
       } catch (e) {
         $("subtitulo").textContent = "Sem conexão com a API. Ela está rodando? (uvicorn api:app --reload)";
+      }
+    }
+
+    // ---- configuracao: cadastrar sala ----
+    function avisarEm(id, texto, erro) {
+      $(id).textContent = texto;
+      $(id).className = "retorno" + (erro ? " erro" : "");
+    }
+
+    $("nCadastrar").addEventListener("click", async () => {
+      const corpo = {
+        numero: $("nNumero").value.trim(),
+        bloco: $("nBloco").value.trim(),
+        equipamento: $("nEquipamento").value.trim() || "Central de ar",
+      };
+      try {
+        await chamar("POST", "/api/salas", corpo);
+        avisarEm("nRetorno", `Sala ${corpo.numero} cadastrada. Agora escolha o ESP32 dela abaixo.`);
+        $("nNumero").value = "";
+        $("nEquipamento").value = "";
+        await atualizar();
+      } catch (e) {
+        avisarEm("nRetorno", e.message, true);
+      }
+    });
+
+    // ---- configuracao: os ESP32 e a sala de cada um ----
+    // As linhas sao criadas uma vez por ESP32; a atualizacao automatica so
+    // muda o texto de estado, para nao trocar a sala que a pessoa esta escolhendo.
+    function opcoesDeSala(select, lista, valor) {
+      const nenhuma = criar("option", "", "— sem sala —");
+      nenhuma.value = "";
+      select.replaceChildren(nenhuma, ...lista.map(s => {
+        const opcao = criar("option", "", `Sala ${s.numero} (bloco ${s.bloco})`);
+        opcao.value = s.numero;
+        return opcao;
+      }));
+      select.value = lista.some(s => s.numero === valor) ? valor : "";
+    }
+
+    function mostrarDispositivos(lista, listaSalas, salasMudaram) {
+      lista.forEach(d => {
+        let linha = linhasEsp[d.id];
+        if (!linha) {
+          const li = criar("li");
+          const nome = criar("span", "mac", d.id);
+          const estado = criar("span", "estado-esp");
+          const select = criar("select");
+          select.setAttribute("aria-label", `Sala do ESP32 ${d.id}`);
+          const salvar = criar("button", "botao", "Salvar");
+          salvar.addEventListener("click", () => escolherSala(d.id, select.value));
+          li.append(nome, estado, select, salvar);
+          $("dispositivos").append(li);
+          linha = linhasEsp[d.id] = { li, estado, select };
+          opcoesDeSala(select, listaSalas, d.sala);
+        } else if (salasMudaram) {
+          opcoesDeSala(linha.select, listaSalas, linha.select.value || d.sala);
+        }
+        linha.li.className = d.sala ? "" : "novo";
+        linha.estado.textContent = `${d.online ? "online" : "offline"} · ${d.sala ? `sala ${d.sala}` : "sem sala"}`;
+      });
+      $("semDispositivos").hidden = lista.length > 0;
+    }
+
+    async function escolherSala(id, sala) {
+      try {
+        await chamar("PUT", `/api/dispositivos/${encodeURIComponent(id)}/sala`, { sala: sala || null });
+        avisarEm("dRetorno", sala
+          ? `ESP32 ${id} agora é da sala ${sala}. Ele fica sabendo em alguns segundos.`
+          : `ESP32 ${id} ficou sem sala.`);
+        await atualizar();
+      } catch (e) {
+        avisarEm("dRetorno", e.message, true);
       }
     }
 
@@ -413,6 +530,19 @@
     }
     $("jMenos").addEventListener("click", () => mudarGraus(-1));
     $("jMais").addEventListener("click", () => mudarGraus(+1));
+
+    $("jExcluir").addEventListener("click", async () => {
+      const numero = salaAberta;
+      if (!confirm(`Excluir a sala ${numero}? As leituras e o histórico dela serão apagados.`)) return;
+      try {
+        const r = await chamar("DELETE", `/api/salas/${numero}`);
+        $("janela").close();
+        avisarEm("nRetorno", r.mensagem);
+        await atualizar();
+      } catch (e) {
+        avisar(e.message, true);
+      }
+    });
 
     $("jFechar").addEventListener("click", () => $("janela").close());
     $("janela").addEventListener("close", () => { salaAberta = null; });

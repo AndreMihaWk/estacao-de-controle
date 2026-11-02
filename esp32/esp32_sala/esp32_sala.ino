@@ -13,6 +13,11 @@
   A marca e a temperatura do ar de cada sala sao escolhidas no site (banco de
   codigos em codigos_ar.py): o ESP32 nao precisa ser regravado para mudar.
 
+  A SALA tambem e escolhida no site: todo ESP32 e gravado com o mesmo codigo.
+  Ao ligar, ele se apresenta para a API pelo MAC e aparece no site em
+  "ESP32 conectados", sem sala. Depois que o usuario escolhe a sala dele,
+  o ESP32 passa a enviar as leituras e obedecer os comandos dessa sala.
+
   Dois jeitos de falar com a API (escolha em MODO_USB, abaixo):
     - Wi-Fi (MODO_USB = false): o ESP32 chama a API direto pela rede.
     - cabo USB (MODO_USB = true): o ESP32 so escreve e le no cabo, e o
@@ -44,7 +49,7 @@
     - IRremoteESP8266   (funciona no ESP32 tambem)
     - DHT sensor library, da Adafruit (aceite instalar o Adafruit Unified Sensor junto)
 
-  Antes de gravar em cada ESP32, ajuste o bloco "Configuracao" abaixo.
+  Antes de gravar, ajuste o bloco "Configuracao" abaixo (o mesmo para todas as salas).
 */
 
 #include <WiFi.h>
@@ -55,20 +60,17 @@
 #include <DHT.h>
 
 // ---------------------------------------------------------------------------
-// Configuracao — muda de sala para sala
+// Configuracao — igual em todos os ESP32 (a sala e escolhida no site)
 // ---------------------------------------------------------------------------
 // true = fala com a API pelo cabo USB (precisa do ponte_usb.py rodando no PC)
 // false = fala com a API pelo Wi-Fi
-const bool MODO_USB = true;
+const bool MODO_USB = false;
 
-const char* WIFI_NOME  = "POCO X6 Pro 5G";
-const char* WIFI_SENHA = "12345678";
+const char* WIFI_NOME  = "Oliveira";
+const char* WIFI_SENHA = "SENHA_DO_WIFI";  // troque pela senha do Wi-Fi Oliveira
 
-// IP do computador onde a API esta rodando (uvicorn api:app --host 0.0.0.0)
-const char* URL_API = "http://10.97.37.183:8000";
-
-// Numero da sala onde este ESP32 esta instalado
-const char* SALA = "101";
+// IP da TV box RK322x onde a API roda (servico smac, IP fixo)
+const char* URL_API = "http://192.168.10.17:8000";
 
 // Marca e temperatura usadas so se a API nao mandar (ou mandar algo invalido).
 // As de verdade de cada sala sao escolhidas no site.
@@ -125,6 +127,9 @@ int grausDoSite = GRAUS_PADRAO;  // ultima temperatura pedida no site (usada no 
 int posicaoTeste = -1;           // posicao na LISTA do ultimo protocolo testado pelo teclado
 
 unsigned long ultimaLeitura = 0;  // millis() da ultima leitura do sensor
+
+String meuId = "";  // MAC deste ESP32: e o "nome" dele na API e no site
+String sala  = "";  // sala escolhida no site para este ESP32 (vazio = ainda sem sala)
 
 Comando comandoVazio() {
   return {-1, "", MODELO_PADRAO, GRAUS_PADRAO, -1, "", MODELO_PADRAO};
@@ -196,17 +201,31 @@ int numeroJson(const String& json, const char* campo, int padrao) {
   return valor.length() > 0 ? valor.toInt() : padrao;
 }
 
-// Pergunta para a API (pelo Wi-Fi) o que fazer com o ar.
-// Se nao conseguir perguntar, devolve o comando com ligado = -1.
+// Pergunta para a API (pelo Wi-Fi) qual e a sala deste ESP32 e o que fazer
+// com o ar dela. Sem sala escolhida no site, ou se nao conseguir perguntar,
+// devolve o comando com ligado = -1 (o ESP32 nao mexe no ar).
 Comando perguntarComando() {
   Comando comando = comandoVazio();
   HTTPClient http;
-  http.begin(String(URL_API) + "/api/salas/" + SALA + "/comando");
+  http.begin(String(URL_API) + "/api/dispositivos/" + meuId + "/comando");
   int codigo = http.GET();
   if (codigo == 200) {
-    // a resposta e {"ligado":true,"protocolo":"MIRAGE","modelo":1,"graus":23,
-    //               "teste_ligado":-1,"teste_protocolo":"","teste_modelo":0}
+    // a resposta e {"sala":"205","ligado":true,"protocolo":"MIRAGE","modelo":1,
+    //   "graus":23,"teste_ligado":-1,"teste_protocolo":"","teste_modelo":0}
+    // ou so {"sala":""} enquanto ninguem escolheu a sala no site
     String resposta = http.getString();
+    String salaNova = campoJson(resposta, "sala");
+    if (salaNova != sala) {
+      sala = salaNova;
+      if (sala.length() > 0) {
+        Serial.println("Sala escolhida no site: " + sala);
+      }
+    }
+    if (sala.length() == 0) {
+      Serial.println("Sem sala: escolha a sala deste ESP32 (" + meuId + ") no site, em Configuracao");
+      http.end();
+      return comando;
+    }
     comando.ligado         = campoJson(resposta, "ligado") == "true" ? 1 : 0;
     comando.protocolo      = campoJson(resposta, "protocolo");
     comando.modelo         = numeroJson(resposta, "modelo", MODELO_PADRAO);
@@ -334,8 +353,14 @@ void enviarLeitura() {
     return;
   }
 
+  // sem sala escolhida no site, a leitura nao tem para onde ir
+  if (sala.length() == 0) {
+    Serial.printf("%.1f C | %.1f%% umidade (nao enviado: sem sala)\n", temperatura, umidade);
+    return;
+  }
+
   // o mesmo JSON que o simulador manda: {"sala":"101","temperatura":27.0,"umidade":60.0}
-  String json = String("{\"sala\":\"") + SALA + "\""
+  String json = String("{\"sala\":\"") + sala + "\""
               + ",\"temperatura\":" + String(temperatura, 1)
               + ",\"umidade\":" + String(umidade, 1) + "}";
 
@@ -357,7 +382,12 @@ void enviarLeitura() {
 void setup() {
   Serial.begin(115200);
   sensor.begin();
-  if (!MODO_USB) conectarWifi();
+  if (!MODO_USB) {
+    WiFi.mode(WIFI_STA);
+    conectarWifi();
+    meuId = WiFi.macAddress();  // ex.: "24:6F:28:AB:CD:EF" (so fica certo depois que o Wi-Fi liga)
+    Serial.println("ESP32 " + meuId);
+  }
   Serial.println("Teste de marcas pelo Monitor Serial: digite l para ver a lista");
 }
 

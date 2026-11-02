@@ -4,3 +4,5 @@ __pycache__/
 .venv-1/
 smac.db
 ponte_usb.py
+COMO_FUNCIONA.md
+esp32/esp32_sala/build/

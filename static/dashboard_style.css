@@ -82,6 +82,20 @@ h2 {
 .lista-eventos .auto .texto { color: var(--aviso); }
 .vazio { color: var(--texto-fraco); font-size: 0.9rem; margin: 0; }
 
+/* --- configuracao: cadastrar salas e escolher a sala de cada ESP32 --- */
+.config { margin-bottom: 28px; }
+.config h4 { margin: 0 0 10px; font-size: 0.85rem; font-weight: 600; color: var(--texto-fraco); }
+.lista-dispositivos { list-style: none; margin: 0; padding: 0; }
+.lista-dispositivos li {
+  display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center;
+  padding: 8px 0; font-size: 0.9rem;
+  border-top: 1px solid var(--borda);
+}
+.lista-dispositivos li:first-child { border-top: 0; }
+.lista-dispositivos .mac { font-family: ui-monospace, monospace; font-weight: 600; }
+.lista-dispositivos .estado-esp { color: var(--texto-fraco); flex: 1; min-width: 140px; }
+.lista-dispositivos .novo .estado-esp { color: var(--aviso); }
+
 /* --- blocos e salas --- */
 .bloco { margin-bottom: 24px; }
 .bloco h2 span { font-weight: 400; }

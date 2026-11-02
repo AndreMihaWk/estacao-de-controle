@@ -11,11 +11,13 @@ Este e o backend que roda no servidor (a parte "Cloud" do projeto). Ele:
 
 Quem conversa com a API:
 
-  - o SITE        liga/desliga, escolhe a temperatura do ar, testa marcas,
+  - o SITE        cadastra as salas, escolhe a sala de cada ESP32,
+                  liga/desliga, escolhe a temperatura do ar, testa marcas,
                   programa horario e mostra os avisos
-  - o ESP32       pergunta "o ar deve estar ligado? em quantos graus?" e
-                  dispara o infravermelho no codigo da marca da sala
-                  (banco de codigos: codigos_ar.py)
+  - o ESP32       se apresenta pelo MAC, descobre a sala escolhida para ele
+                  no site, pergunta "o ar deve estar ligado? em quantos
+                  graus?" e dispara o infravermelho no codigo da marca da
+                  sala (banco de codigos: codigos_ar.py)
   - a CAMERA      pergunta "e hora de verificar?" e responde quantas pessoas viu
 
 Feito com FastAPI. Para rodar:
@@ -38,9 +40,7 @@ from pydantic import BaseModel, Field
 import banco
 import codigos_ar
 
-# ---------------------------------------------------------------------------
-# Configuracao (Industria 4.0: as regras de decisao automatica ficam aqui)
-# ---------------------------------------------------------------------------
+
 # Se a temperatura passar deste limite, o sistema dispara um alerta.
 LIMITE_TEMPERATURA = 28.0  # graus Celsius
 
@@ -59,8 +59,9 @@ SEGUNDOS_ONLINE = 30
 TEMPERATURA_AR_MINIMA = 16
 TEMPERATURA_AR_MAXIMA = 30
 
-# Guarda quando cada ESP32 e cada camera falaram com a API pela ultima vez.
-ultimo_contato = {"dispositivo": {}, "camera": {}}
+# Guarda quando cada ESP32 e cada camera falaram com a API pela ultima vez:
+# "dispositivo" e "camera" por numero de sala, "esp32" pelo MAC do ESP32.
+ultimo_contato = {"dispositivo": {}, "camera": {}, "esp32": {}}
 
 # Teste de marca pedido no site e ainda nao entregue ao ESP32, por sala.
 # Ex.: {"101": {"ligado": True, "protocolo": "MIRAGE", "modelo": 1}}
@@ -75,6 +76,18 @@ class Leitura(BaseModel):
     sala: str
     temperatura: float
     umidade: float
+
+
+class NovaSala(BaseModel):
+    """Sala cadastrada pelo usuario no site."""
+    numero: str = Field(pattern=r"^[0-9A-Za-z-]{1,10}$")  # ex.: "205", "LAB-1"
+    bloco: str = Field(min_length=1, max_length=20)
+    equipamento: str = Field("Central de ar", min_length=1, max_length=60)
+
+
+class SalaDoDispositivo(BaseModel):
+    """Sala escolhida no site para um ESP32. Vazio (null) = tirar da sala."""
+    sala: Optional[str] = None
 
 
 class Energia(BaseModel):
@@ -277,6 +290,57 @@ def salas():
     }
 
 
+@app.post("/api/salas", status_code=201)
+def cadastrar_sala(nova: NovaSala):
+    """Cadastra uma sala nova (formulario "Nova sala" do site)."""
+    numero = nova.numero.strip()
+    if not banco.criar_sala(numero, nova.bloco.strip().upper(), nova.equipamento.strip()):
+        raise HTTPException(status_code=409, detail=f"A sala {numero} já está cadastrada.")
+    banco.registrar_evento(numero, "SALA", f"Sala {numero} cadastrada.")
+    return para_o_painel(banco.buscar_sala(numero))
+
+
+@app.delete("/api/salas/{numero}")
+def excluir_sala(numero: str):
+    """Apaga a sala, com suas leituras e historico. O ESP32 dela fica sem sala."""
+    sala_ou_404(numero)
+    banco.excluir_sala(numero)
+    testes_pendentes.pop(numero, None)
+    return {"mensagem": f"Sala {numero} excluída."}
+
+
+@app.get("/api/dispositivos")
+def dispositivos():
+    """Os ESP32 que ja falaram com a API, a sala de cada um e se estao online."""
+    lista = banco.listar_dispositivos()
+    for d in lista:
+        visto = ultimo_contato["esp32"].get(d["id"])
+        d["online"] = visto is not None and time.time() - visto < SEGUNDOS_ONLINE
+    return {"dispositivos": lista}
+
+
+@app.put("/api/dispositivos/{id_dispositivo}/sala")
+def escolher_sala(id_dispositivo: str, dados: SalaDoDispositivo):
+    """
+    Coloca o ESP32 numa sala (ou tira dele a sala). O ESP32 fica sabendo na
+    proxima pergunta e passa a enviar as leituras e obedecer os comandos dela.
+    """
+    if banco.buscar_dispositivo(id_dispositivo) is None:
+        raise HTTPException(status_code=404, detail="Esse ESP32 nunca falou com a API.")
+    if dados.sala:
+        sala_ou_404(dados.sala)
+        outro = banco.dispositivo_da_sala(dados.sala)
+        if outro and outro["id"] != id_dispositivo:
+            raise HTTPException(
+                status_code=409,
+                detail=f"A sala {dados.sala} já tem o ESP32 {outro['id']}. Tire ele da sala antes.",
+            )
+    banco.vincular_dispositivo(id_dispositivo, dados.sala or None)
+    if dados.sala:
+        banco.registrar_evento(dados.sala, "ESP32", f"ESP32 {id_dispositivo} instalado nesta sala.")
+    return banco.buscar_dispositivo(id_dispositivo)
+
+
 @app.post("/api/salas/{numero}/energia")
 def controlar_energia(numero: str, pedido: Energia):
     """Liga ou desliga o ar da sala de forma remota (botao do site)."""
@@ -415,6 +479,24 @@ def comando(numero: str):
         "teste_protocolo": teste["protocolo"] if teste else "",
         "teste_modelo": teste["modelo"] if teste else 0,
     }
+
+
+@app.get("/api/dispositivos/{id_dispositivo}/comando")
+def comando_do_dispositivo(id_dispositivo: str):
+    """
+    O ESP32 gravado SEM sala chama este endereco, se apresentando pelo MAC.
+    Na primeira vez ele aparece no site como ESP32 sem sala; depois que o
+    usuario escolhe a sala no site, a resposta traz o numero da sala e o
+    mesmo comando de /api/salas/{numero}/comando.
+
+    Sem sala, a resposta e so {"sala": ""}: o ESP32 espera e nao mexe no ar.
+    """
+    ultimo_contato["esp32"][id_dispositivo] = time.time()
+    dispositivo = banco.registrar_dispositivo(id_dispositivo)
+    numero = dispositivo["sala"]
+    if not numero or banco.buscar_sala(numero) is None:
+        return {"sala": ""}
+    return {"sala": numero, **comando(numero)}
 
 
 @app.post("/api/leituras")
